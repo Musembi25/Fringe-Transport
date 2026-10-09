@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import {
   ArrowRight,
   Check,
@@ -77,16 +78,60 @@ const stats = [
 ];
 
 export default function Home() {
+  const backgroundVideoRef = useRef(null);
+
+  useEffect(() => {
+    const video = backgroundVideoRef.current;
+    if (!video) return undefined;
+
+    video.defaultMuted = true;
+    video.muted = true;
+    video.setAttribute("muted", "");
+    video.setAttribute("playsinline", "");
+    video.setAttribute("webkit-playsinline", "");
+
+    const playBackground = () => {
+      if (document.visibilityState !== "visible" || !video.paused) return;
+
+      video.play()?.catch((error) => {
+        if (error.name !== "NotAllowedError" && error.name !== "AbortError") {
+          console.error("Unable to play the home page background video.", error);
+        }
+      });
+    };
+
+    video.addEventListener("loadeddata", playBackground);
+    video.addEventListener("canplay", playBackground);
+    document.addEventListener("visibilitychange", playBackground);
+    window.addEventListener("pageshow", playBackground);
+    window.addEventListener("pointerdown", playBackground);
+    window.addEventListener("touchstart", playBackground, { passive: true });
+    playBackground();
+
+    return () => {
+      video.removeEventListener("loadeddata", playBackground);
+      video.removeEventListener("canplay", playBackground);
+      document.removeEventListener("visibilitychange", playBackground);
+      window.removeEventListener("pageshow", playBackground);
+      window.removeEventListener("pointerdown", playBackground);
+      window.removeEventListener("touchstart", playBackground);
+    };
+  }, []);
+
   return (
     <div className="home-page">
       <section className="hero-section">
         <video
+          ref={backgroundVideoRef}
           className="hero-background-video"
           autoPlay
           muted
           loop
           playsInline
-          preload="metadata"
+          preload="auto"
+          controls={false}
+          disablePictureInPicture
+          disableRemotePlayback
           aria-hidden="true"
           tabIndex={-1}
         >
