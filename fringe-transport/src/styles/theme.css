@@ -1,0 +1,44 @@
+:root {
+  /* Fringe Transport Brand */
+  --ft-black: #111111;
+  --ft-charcoal: #1c1c1c;
+  --ft-dark: #242424;
+
+  --ft-white: #ffffff;
+  --ft-cream: #f7f6f2;
+
+  --ft-orange: #d97706;
+  --ft-orange-light: #f59e0b;
+  --ft-orange-dark: #b45309;
+
+  /* Text */
+  --ft-text: #171717;
+  --ft-text-light: #404040;
+  --ft-muted: #737373;
+  --ft-muted-light: #a3a3a3;
+
+  /* Borders */
+  --ft-border: #e5e5e5;
+  --ft-border-dark: #d4d4d4;
+
+  /* Status */
+  --ft-success: #15803d;
+  --ft-warning: #ca8a04;
+  --ft-danger: #dc2626;
+  --ft-info: #2563eb;
+
+  /* Radius */
+  --ft-radius-sm: 6px;
+  --ft-radius-md: 10px;
+  --ft-radius-lg: 16px;
+  --ft-radius-xl: 24px;
+
+  /* Shadows */
+  --ft-shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --ft-shadow-md: 0 8px 24px rgba(0, 0, 0, 0.08);
+  --ft-shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.12);
+
+  /* Layout */
+  --ft-container: 1280px;
+  --ft-header-height: 76px;
+}

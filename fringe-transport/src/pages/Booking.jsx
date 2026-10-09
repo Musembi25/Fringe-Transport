@@ -1,0 +1,1089 @@
+import { supabase } from "../lib/supabase";
+import jsPDF from "jspdf";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowRight,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  Luggage,
+  MapPin,
+  Minus,
+  Plus,
+  Users,
+} from "lucide-react";
+import { Link } from "react-router-dom";
+import bookingBackground from "../assets/booking.jpg";
+import receiptLogo from "../assets/logo-cropped.png?inline";
+
+const initialForm = {
+  fullName: "",
+  phone: "",
+  email: "",
+  pickup: "",
+  destination: "",
+  date: "",
+  time: "",
+  tripType: "one-way",
+  passengers: 1,
+  luggage: 0,
+  service: "Private Ride",
+  flightNumber: "",
+  additionalStops: "",
+  instructions: "",
+};
+
+const defaultServices = [
+  "Private Ride",
+  "Airport Transfer",
+  "Corporate Transport",
+  "Hourly Hire",
+  "Full-Day Transport",
+].map((name) => ({
+  id: name,
+  name,
+  description: "",
+  base_price: null,
+}));
+
+const formatFare = (value) => {
+  if (value == null || value === "") return "Fare confirmed after review";
+
+  return new Intl.NumberFormat("en-KE", {
+    style: "currency",
+    currency: "KES",
+    maximumFractionDigits: 2,
+  }).format(Number(value));
+};
+
+const tripTypes = [
+  { value: "one-way", label: "One Way" },
+  { value: "return", label: "Return" },
+  { value: "hourly", label: "Hourly" },
+  { value: "airport", label: "Airport Transfer" },
+  { value: "full-day", label: "Full Day" },
+];
+
+
+function downloadBookingReceipt(form, reference) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const left = 18;
+  const right = pageWidth - 18;
+  let y = 60;
+
+  // Fringe Transport brand header.
+  doc.setFillColor(17, 17, 17);
+  doc.rect(0, 0, pageWidth, 47, "F");
+  doc.setFillColor(217, 119, 6);
+  doc.rect(0, 0, 5, 47, "F");
+
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(left, 5, 58, 36, 3, 3, "F");
+  doc.addImage(receiptLogo, "PNG", left + 3, 12, 52, 20.7);
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(21);
+  doc.text("FRINGE TRANSPORT", left + 66, 19);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(220, 220, 220);
+  doc.text("PREMIUM TRANSPORT | NAIROBI, KENYA", left + 66, 27);
+  doc.text("+254 742 934 895", left + 66, 35);
+  doc.text("musembi.shad1@gmail.com", right, 35, { align: "right" });
+
+  // Receipt title and reference.
+  doc.setTextColor(17, 17, 17);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(16);
+  doc.text("BOOKING REQUEST RECEIPT", left, y);
+  y += 9;
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(11);
+  doc.text(`Reference: ${reference}`, left, y);
+  y += 7;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(100, 100, 100);
+  doc.text(
+    `Request submitted: ${new Date().toLocaleString("en-KE", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    })}`,
+    left,
+    y
+  );
+  y += 10;
+
+  // Important booking-status notice.
+  doc.setFillColor(255, 247, 237);
+  doc.setDrawColor(217, 119, 6);
+  doc.roundedRect(left, y - 5, pageWidth - 36, 19, 2, 2, "FD");
+  doc.setTextColor(146, 64, 14);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("REQUEST RECEIVED - NOT YET CONFIRMED", left + 4, y + 2);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.text(
+    "Fringe Transport must review and confirm your booking.",
+    left + 4,
+    y + 8
+  );
+  y += 25;
+
+  const rows = [
+    ["CUSTOMER DETAILS", ""],
+    ["Full name", form.fullName],
+    ["Phone", form.phone],
+    ["Email", form.email],
+    ["JOURNEY DETAILS", ""],
+    ["Pickup location", form.pickup],
+    ["Destination", form.destination],
+    ["Travel date", form.date],
+    ["Departure time", form.time],
+    ["Trip type", form.tripType],
+    ["Service", form.service],
+    ["Passengers", String(form.passengers)],
+    ["Luggage items", String(form.luggage)],
+    ["Flight number", form.flightNumber],
+    ["Additional stops", form.additionalStops],
+    ["Special instructions", form.instructions],
+  ];
+
+  for (const [label, value] of rows) {
+    if (!value && label !== "Flight number" &&
+        label !== "Additional stops" &&
+        label !== "Special instructions") {
+      if (label === "CUSTOMER DETAILS" || label === "JOURNEY DETAILS") {
+        y += 2;
+        doc.setTextColor(217, 119, 6);
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(9);
+        doc.text(label, left, y);
+        y += 7;
+        doc.setDrawColor(225, 225, 225);
+        doc.line(left, y - 3, right, y - 3);
+      }
+      continue;
+    }
+
+    const displayValue = value ? String(value) : "Not provided";
+    const wrapped = doc.splitTextToSize(displayValue, 119);
+    const rowHeight = Math.max(8, wrapped.length * 4.5 + 3);
+
+    if (y + rowHeight > pageHeight - 22) {
+      doc.addPage();
+      y = 22;
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(105, 105, 105);
+    doc.text(label, left, y);
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(35, 35, 35);
+    doc.text(wrapped, 70, y);
+
+    y += rowHeight;
+
+    doc.setDrawColor(240, 240, 240);
+    doc.line(left, y - 2, right, y - 2);
+  }
+
+  // Footer on every page.
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page++) {
+    doc.setPage(page);
+    doc.setDrawColor(225, 225, 225);
+    doc.line(left, pageHeight - 14, right, pageHeight - 14);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor(110, 110, 110);
+    doc.text(
+      "Fringe Transport | +254 742 934 895 | Keep this reference for enquiries.",
+      left,
+      pageHeight - 8
+    );
+    doc.text(`${page}/${pageCount}`, right, pageHeight - 8, {
+      align: "right",
+    });
+  }
+
+  const safeReference = String(reference).replace(/[^a-zA-Z0-9_-]/g, "_");
+  doc.save(`Fringe-Transport-${safeReference}.pdf`);
+}
+
+export default function Booking() {
+  const [form, setForm] = useState(initialForm);
+  const [errors, setErrors] = useState({});
+  const [submitted, setSubmitted] = useState(false);
+  const [reference, setReference] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState("");
+  const [services, setServices] = useState([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [servicesError, setServicesError] = useState("");
+  const bookingServices = services.length > 0 ? services : defaultServices;
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadActiveServices() {
+      setServicesLoading(true);
+      setServicesError("");
+
+      const { data, error } = await supabase
+        .from("services")
+        .select("id, name, description, base_price, active")
+        .eq("active", true)
+        .order("name", { ascending: true });
+
+      if (cancelled) return;
+
+      if (error) {
+        console.error("Could not load Fringe Transport services:", error);
+        setServices([]);
+        setServicesError(
+          "We couldn't load our available services. Please refresh the page or contact Fringe Transport."
+        );
+        setServicesLoading(false);
+        return;
+      }
+
+      const available = data ?? [];
+      setServices(available);
+
+      setForm((current) => {
+        const currentStillAvailable = available.some(
+          (service) => service.name === current.service
+        );
+
+        return {
+          ...current,
+          service: currentStillAvailable
+            ? current.service
+            : (available[0]?.name ?? defaultServices[0].name),
+        };
+      });
+
+      setServicesLoading(false);
+    }
+
+    loadActiveServices();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const updateField = (field, value) => {
+    setForm((current) => ({
+      ...current,
+      [field]: value,
+    }));
+
+    if (errors[field]) {
+      setErrors((current) => ({
+        ...current,
+        [field]: "",
+      }));
+    }
+  };
+
+  const today = new Date().toISOString().split("T")[0];
+
+  const summary = useMemo(
+    () => ({
+      customer: form.fullName || "Your name",
+      route:
+        form.pickup && form.destination
+          ? `${form.pickup} → ${form.destination}`
+          : "Pickup → Destination",
+      date: form.date || "Select date",
+      time: form.time || "Select time",
+      passengers: form.passengers,
+      luggage: form.luggage,
+      service: form.service,
+    }),
+    [form],
+  );
+
+  const validate = () => {
+    const nextErrors = {};
+
+    if (!form.fullName.trim()) {
+      nextErrors.fullName = "Please enter your full name.";
+    }
+
+    if (!form.phone.trim()) {
+      nextErrors.phone = "Please enter your phone number.";
+    }
+
+    if (!form.email.trim()) {
+      nextErrors.email = "Please enter your email address.";
+    } else if (!/^\S+@\S+\.\S+$/.test(form.email)) {
+      nextErrors.email = "Please enter a valid email address.";
+    }
+
+    if (!form.pickup.trim()) {
+      nextErrors.pickup = "Please enter your pickup location.";
+    }
+
+    if (!form.destination.trim()) {
+      nextErrors.destination = "Please enter your destination.";
+    }
+
+    if (!form.date) {
+      nextErrors.date = "Please select your travel date.";
+    }
+
+    if (!form.time) {
+      nextErrors.time = "Please select your preferred time.";
+    }
+
+    if (!services.some((service) => service.name === form.service)) {
+      nextErrors.service = "Please select an available transport service.";
+    }
+
+    if (form.service === "Airport Transfer" && !form.flightNumber.trim()) {
+      nextErrors.flightNumber =
+        "Please provide your flight number for an airport transfer.";
+    }
+
+    setErrors(nextErrors);
+
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (isSubmitting) return;
+
+    if (servicesLoading || servicesError || services.length === 0) {
+      setSubmitError(
+        servicesError ||
+          "Booking is temporarily unavailable because no active services are configured."
+      );
+      return;
+    }
+
+    if (!validate()) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+
+    setIsSubmitting(true);
+    setSubmitError("");
+
+    try {
+      const { data, error } = await supabase.rpc(
+        "create_public_booking",
+        {
+          p_booking: {
+            fullName: form.fullName.trim(),
+            phone: form.phone.trim(),
+            email: form.email.trim(),
+            pickup: form.pickup.trim(),
+            destination: form.destination.trim(),
+            date: form.date,
+            time: form.time,
+            tripType: form.tripType,
+            passengers: form.passengers,
+            luggage: form.luggage,
+            service: form.service,
+            flightNumber: form.flightNumber.trim(),
+            additionalStops: form.additionalStops.trim(),
+            instructions: form.instructions.trim(),
+          },
+        }
+      );
+
+      if (error) throw error;
+
+      if (!data || !data.reference || !data.id) {
+        throw new Error("The booking confirmation was incomplete.");
+      }
+
+      setReference(data.reference);
+      setSubmitted(true);
+
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } catch (error) {
+      console.error("Fringe Transport booking submission failed:", error);
+
+      setSubmitError(
+        "We couldn't confirm that your request was saved. Please check your connection. If this continues, contact Fringe Transport before submitting again."
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const changePassengers = (amount) => {
+    setForm((current) => ({
+      ...current,
+      passengers: Math.min(8, Math.max(1, current.passengers + amount)),
+    }));
+  };
+
+  const changeLuggage = (amount) => {
+    setForm((current) => ({
+      ...current,
+      luggage: Math.min(10, Math.max(0, current.luggage + amount)),
+    }));
+  };
+
+  if (submitted) {
+    const whatsappMessage = encodeURIComponent(
+      `Hello Fringe Transport, I have submitted a booking request.\n\nBooking reference: ${reference}\nName: ${form.fullName}\nPickup: ${form.pickup}\nDestination: ${form.destination}\nDate: ${form.date}\nTime: ${form.time}`,
+    );
+
+    return (
+      <main className="min-h-[calc(100vh-76px)] bg-[#f7f6f2]">
+        <section className="mx-auto max-w-4xl px-5 py-16 sm:px-6 lg:px-8 lg:py-24">
+          <div className="overflow-hidden border border-neutral-200 bg-white">
+            <div className="border-b border-neutral-200 bg-[#111111] px-6 py-10 text-white sm:px-10">
+              <div className="flex h-14 w-14 items-center justify-center bg-[#d97706]">
+                <CheckCircle2 size={30} />
+              </div>
+
+              <p className="mt-7 text-xs font-semibold uppercase tracking-[0.25em] text-[#f59e0b]">
+                Booking request received
+              </p>
+
+              <h1 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+                Your journey request is in.
+              </h1>
+
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-neutral-400">
+                Thank you, {form.fullName.split(" ")[0]}. We have captured your
+                booking details. Keep your reference below for communication
+                about this journey.
+              </p>
+            </div>
+
+            <div className="p-6 sm:p-10">
+              <div className="border border-neutral-200 bg-[#f7f6f2] p-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-neutral-500">
+                  Booking reference
+                </p>
+
+                <p className="mt-2 text-2xl font-bold tracking-wide text-[#111111]">
+                  {reference}
+                </p>
+              </div>
+
+              <div className="mt-8 grid gap-6 sm:grid-cols-2">
+                <SummaryItem label="Passenger" value={form.fullName} />
+                <SummaryItem label="Phone" value={form.phone} />
+                <SummaryItem label="Pickup" value={form.pickup} />
+                <SummaryItem label="Destination" value={form.destination} />
+                <SummaryItem label="Date" value={form.date} />
+                <SummaryItem label="Time" value={form.time} />
+                <SummaryItem label="Service" value={form.service} />
+                <SummaryItem
+                  label="Passengers"
+                  value={`${form.passengers} ${
+                    form.passengers === 1 ? "passenger" : "passengers"
+                  }`}
+                />
+              </div>
+
+              <div className="mt-10 flex flex-col gap-3 sm:flex-row">
+                <a
+                  href={`https://wa.me/254742934895?text=${whatsappMessage}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center justify-center bg-[#d97706] px-6 py-4 text-sm font-semibold text-white hover:bg-[#b45309]"
+                >
+                  Send Reference on WhatsApp
+                </a>
+
+                <a
+                  href="tel:+254742934895"
+                  className="inline-flex items-center justify-center border border-neutral-300 px-6 py-4 text-sm font-semibold text-[#111111] hover:border-[#111111]"
+                >
+                  Call Fringe Transport
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => downloadBookingReceipt(form, reference)}
+                  className="inline-flex items-center justify-center border border-neutral-300 px-6 py-4 text-sm font-semibold text-[#111111] hover:border-[#d97706] hover:text-[#d97706]"
+                >
+                  Download PDF Receipt
+                </button>
+              </div>
+
+              <div className="mt-10 border-t border-neutral-200 pt-6">
+                <Link
+                  to="/"
+                  className="inline-flex items-center gap-2 text-sm font-semibold text-[#111111] hover:text-[#d97706]"
+                >
+                  Return to homepage
+                  <ArrowRight size={16} />
+                </Link>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  return (
+    <main className="bg-[#f7f6f2]">
+      {/* PAGE HEADER */}
+      <section
+        className="page-hero page-hero--booking bg-[#111111] text-white"
+        style={{ "--page-hero-image": `url(${bookingBackground})` }}
+      >
+        <div className="page-hero-content mx-auto max-w-[1280px] px-5 py-16 sm:px-6 lg:px-8 lg:py-20">
+          <p className="text-xs font-semibold uppercase tracking-[0.25em] text-[#f59e0b]">
+            Reserve your journey
+          </p>
+
+          <h1 className="mt-4 max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl">
+            Tell us where you need to go.
+          </h1>
+
+          <p className="mt-5 max-w-2xl text-base leading-8 text-neutral-400">
+            Complete the form below and we'll review your journey request.
+            We'll use the contact details provided to confirm the booking.
+          </p>
+        </div>
+      </section>
+
+      {/* BOOKING */}
+      <section className="mx-auto max-w-[1280px] px-5 py-12 sm:px-6 lg:px-8 lg:py-20">
+        <form
+          onSubmit={handleSubmit}
+          noValidate
+          className="grid gap-8 lg:grid-cols-[1fr_360px]"
+        >
+          <div className="space-y-8">
+            {/* CUSTOMER */}
+            <BookingSection
+              number="01"
+              title="Your details"
+              description="Tell us who will be travelling."
+            >
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field
+                  label="Full name"
+                  required
+                  value={form.fullName}
+                  onChange={(value) => updateField("fullName", value)}
+                  placeholder="e.g. John Kamau"
+                  error={errors.fullName}
+                />
+
+                <Field
+                  label="Phone number"
+                  required
+                  type="tel"
+                  value={form.phone}
+                  onChange={(value) => updateField("phone", value)}
+                  placeholder="+254 7XX XXX XXX"
+                  error={errors.phone}
+                />
+
+                <Field
+                  label="Email address"
+                  required
+                  type="email"
+                  value={form.email}
+                  onChange={(value) => updateField("email", value)}
+                  placeholder="you@example.com"
+                  error={errors.email}
+                  className="sm:col-span-2"
+                />
+              </div>
+            </BookingSection>
+
+            {/* JOURNEY */}
+            <BookingSection
+              number="02"
+              title="Your journey"
+              description="Where are you travelling from and where are you going?"
+            >
+              <div className="grid gap-5 sm:grid-cols-2">
+                <Field
+                  label="Pickup location"
+                  required
+                  value={form.pickup}
+                  onChange={(value) => updateField("pickup", value)}
+                  placeholder="e.g. Westlands"
+                  icon={<MapPin size={17} />}
+                  error={errors.pickup}
+                />
+
+                <Field
+                  label="Destination"
+                  required
+                  value={form.destination}
+                  onChange={(value) => updateField("destination", value)}
+                  placeholder="e.g. JKIA Terminal 1"
+                  icon={<MapPin size={17} />}
+                  error={errors.destination}
+                />
+
+                <Field
+                  label="Travel date"
+                  required
+                  type="date"
+                  min={today}
+                  value={form.date}
+                  onChange={(value) => updateField("date", value)}
+                  icon={<CalendarDays size={17} />}
+                  error={errors.date}
+                />
+
+                <Field
+                  label="Preferred time"
+                  required
+                  type="time"
+                  value={form.time}
+                  onChange={(value) => updateField("time", value)}
+                  icon={<Clock3 size={17} />}
+                  error={errors.time}
+                />
+              </div>
+
+              <div className="mt-6">
+                <label className="mb-3 block text-sm font-semibold text-[#111111]">
+                  Trip type
+                </label>
+
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                  {tripTypes.map((trip) => (
+                    <button
+                      key={trip.value}
+                      type="button"
+                      onClick={() => updateField("tripType", trip.value)}
+                      className={`border px-3 py-3 text-sm font-medium transition ${
+                        form.tripType === trip.value
+                          ? "border-[#d97706] bg-[#d97706] text-white"
+                          : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-400"
+                      }`}
+                    >
+                      {trip.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </BookingSection>
+
+            {/* SERVICE */}
+            <BookingSection
+              number="03"
+              title="Transport details"
+              description="Choose the service that best fits your journey."
+            >
+              <div>
+                <label className="mb-3 block text-sm font-semibold text-[#111111]">
+                  Service
+                </label>
+
+                {servicesLoading ? (
+                  <p className="border border-neutral-200 bg-white p-4 text-sm text-neutral-600">
+                    Loading available services...
+                  </p>
+                ) : (
+                  <>
+                    {servicesError ? (
+                      <div role="alert" className="mb-3 flex flex-wrap items-center justify-between gap-2 border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        <span>{servicesError} Showing standard request options for now.</span>
+                        <button
+                          type="button"
+                          onClick={() => window.location.reload()}
+                          className="font-semibold underline"
+                        >
+                          Try again
+                        </button>
+                      </div>
+                    ) : services.length === 0 ? (
+                      <p role="status" className="mb-3 border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                        The service catalogue is being updated. You can still submit a request using these standard options.
+                      </p>
+                    ) : null}
+
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                      {bookingServices.map((service) => (
+                        <button
+                          key={service.id}
+                          type="button"
+                          aria-pressed={form.service === service.name}
+                          onClick={() => updateField("service", service.name)}
+                          className={`border p-4 text-left transition ${
+                            form.service === service.name
+                              ? "border-[#d97706] bg-orange-50"
+                              : "border-neutral-200 bg-white hover:border-neutral-400"
+                          }`}
+                        >
+                          <span className="block text-sm font-semibold text-[#111111]">
+                            {service.name}
+                          </span>
+
+                          <span className="mt-2 block text-sm font-medium text-amber-800">
+                            {formatFare(service.base_price)}
+                          </span>
+
+                          {service.description && (
+                            <span className="mt-2 block text-xs leading-5 text-neutral-500">
+                              {service.description}
+                            </span>
+                          )}
+
+                          {form.service === service.name && (
+                            <span className="mt-2 block text-xs font-medium text-[#b45309]">
+                              Selected
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+                {errors.service && (
+                  <p className="mt-2 text-sm text-red-700">{errors.service}</p>
+                )}
+              </div>
+
+              {form.service === "Airport Transfer" && (
+                <div className="mt-6">
+                  <Field
+                    label="Flight number"
+                    required
+                    value={form.flightNumber}
+                    onChange={(value) =>
+                      updateField("flightNumber", value)
+                    }
+                    placeholder="e.g. KQ 100"
+                    error={errors.flightNumber}
+                  />
+                </div>
+              )}
+
+              <div className="mt-7 grid gap-6 sm:grid-cols-2">
+                <Counter
+                  label="Passengers"
+                  icon={<Users size={17} />}
+                  value={form.passengers}
+                  min={1}
+                  max={8}
+                  onDecrease={() => changePassengers(-1)}
+                  onIncrease={() => changePassengers(1)}
+                />
+
+                <Counter
+                  label="Luggage"
+                  icon={<Luggage size={17} />}
+                  value={form.luggage}
+                  min={0}
+                  max={10}
+                  onDecrease={() => changeLuggage(-1)}
+                  onIncrease={() => changeLuggage(1)}
+                />
+              </div>
+
+              <div className="mt-6">
+                <Field
+                  label="Additional stops"
+                  value={form.additionalStops}
+                  onChange={(value) =>
+                    updateField("additionalStops", value)
+                  }
+                  placeholder="List any additional stops, if applicable"
+                />
+              </div>
+            </BookingSection>
+
+            {/* NOTES */}
+            <BookingSection
+              number="04"
+              title="Additional information"
+              description="Anything else we should know before confirming your journey?"
+            >
+              <div>
+                <label
+                  htmlFor="instructions"
+                  className="mb-2 block text-sm font-semibold text-[#111111]"
+                >
+                  Special instructions
+                </label>
+
+                <textarea
+                  id="instructions"
+                  value={form.instructions}
+                  onChange={(event) =>
+                    updateField("instructions", event.target.value)
+                  }
+                  rows={5}
+                  placeholder="Accessibility requirements, preferred route, waiting instructions, or anything else..."
+                  className="w-full resize-none border border-neutral-300 bg-white px-4 py-3 text-sm text-[#111111] outline-none transition placeholder:text-neutral-400 focus:border-[#d97706] focus:ring-1 focus:ring-[#d97706]"
+                />
+              </div>
+            </BookingSection>
+
+            {submitError && (
+              <div
+                role="alert"
+                className="border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800"
+              >
+                {submitError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={
+                isSubmitting ||
+                servicesLoading
+              }
+              aria-busy={isSubmitting}
+              className="group flex w-full items-center justify-center gap-3 bg-[#111111] px-6 py-5 text-sm font-semibold text-white transition hover:bg-[#d97706] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {isSubmitting ? "Submitting your request..." : "Submit Booking Request"}
+              {!isSubmitting && (
+                <ArrowRight
+                  size={18}
+                  className="transition-transform group-hover:translate-x-1"
+                />
+              )}
+            </button>
+
+            <p className="text-center text-xs leading-6 text-neutral-500">
+              Submitting this form sends a booking request. Your journey is
+              confirmed only after Fringe Transport reviews and confirms the
+              request.
+            </p>
+          </div>
+
+          {/* SUMMARY */}
+          <aside className="lg:sticky lg:top-24 lg:self-start">
+            <div className="border border-neutral-200 bg-white">
+              <div className="border-b border-neutral-200 bg-[#111111] px-6 py-5 text-white">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-[#f59e0b]">
+                  Booking summary
+                </p>
+
+                <h2 className="mt-1 text-lg font-semibold">
+                  Your journey
+                </h2>
+              </div>
+
+              <div className="p-6">
+                <SummaryRow
+                  label="Passenger"
+                  value={summary.customer}
+                />
+
+                <SummaryRow
+                  label="Route"
+                  value={summary.route}
+                />
+
+                <SummaryRow
+                  label="Date"
+                  value={summary.date}
+                />
+
+                <SummaryRow
+                  label="Time"
+                  value={summary.time}
+                />
+
+                <SummaryRow
+                  label="Service"
+                  value={summary.service}
+                />
+
+                <SummaryRow
+                  label="Passengers"
+                  value={summary.passengers}
+                />
+
+                <SummaryRow
+                  label="Luggage"
+                  value={summary.luggage}
+                  last
+                />
+
+                <div className="mt-7 border-t border-neutral-200 pt-6">
+                  <div className="flex gap-3">
+                    <ShieldIcon />
+
+                    <p className="text-xs leading-5 text-neutral-500">
+                      Your details are used to process and communicate about
+                      your booking request.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </form>
+      </section>
+    </main>
+  );
+}
+
+function BookingSection({ number, title, description, children }) {
+  return (
+    <section className="border border-neutral-200 bg-white p-6 sm:p-8">
+      <div className="mb-7 flex gap-4">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center bg-[#d97706] text-xs font-bold text-white">
+          {number}
+        </div>
+
+        <div>
+          <h2 className="text-xl font-semibold text-[#111111]">{title}</h2>
+          <p className="mt-1 text-sm text-neutral-500">{description}</p>
+        </div>
+      </div>
+
+      {children}
+    </section>
+  );
+}
+
+function Field({
+  label,
+  required = false,
+  type = "text",
+  value,
+  onChange,
+  placeholder,
+  icon,
+  error,
+  min,
+  className = "",
+}) {
+  return (
+    <div className={className}>
+      <label className="mb-2 block text-sm font-semibold text-[#111111]">
+        {label}
+        {required && <span className="ml-1 text-[#d97706]">*</span>}
+      </label>
+
+      <div className="relative">
+        {icon && (
+          <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-neutral-400">
+            {icon}
+          </span>
+        )}
+
+        <input
+          type={type}
+          value={value}
+          min={min}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={placeholder}
+          className={`w-full border bg-white px-4 py-3 text-sm text-[#111111] outline-none transition placeholder:text-neutral-400 focus:border-[#d97706] focus:ring-1 focus:ring-[#d97706] ${
+            icon ? "pl-11" : ""
+          } ${
+            error
+              ? "border-red-400"
+              : "border-neutral-300"
+          }`}
+        />
+      </div>
+
+      {error && (
+        <p className="mt-2 text-xs font-medium text-red-600">{error}</p>
+      )}
+    </div>
+  );
+}
+
+function Counter({
+  label,
+  icon,
+  value,
+  min,
+  max,
+  onDecrease,
+  onIncrease,
+}) {
+  return (
+    <div>
+      <label className="mb-3 flex items-center gap-2 text-sm font-semibold text-[#111111]">
+        {icon}
+        {label}
+      </label>
+
+      <div className="flex h-12 items-center justify-between border border-neutral-300 bg-white">
+        <button
+          type="button"
+          disabled={value <= min}
+          onClick={onDecrease}
+          className="flex h-full w-12 items-center justify-center border-r border-neutral-200 text-neutral-600 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label={`Decrease ${label}`}
+        >
+          <Minus size={16} />
+        </button>
+
+        <span className="text-sm font-semibold text-[#111111]">
+          {value}
+        </span>
+
+        <button
+          type="button"
+          disabled={value >= max}
+          onClick={onIncrease}
+          className="flex h-full w-12 items-center justify-center border-l border-neutral-200 text-neutral-600 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-30"
+          aria-label={`Increase ${label}`}
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function SummaryRow({ label, value, last = false }) {
+  return (
+    <div
+      className={`py-4 ${
+        !last ? "border-b border-neutral-100" : ""
+      }`}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+        {label}
+      </p>
+
+      <p className="mt-1 break-words text-sm font-medium text-[#111111]">
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function SummaryItem({ label, value }) {
+  return (
+    <div>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-400">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-medium text-[#111111]">{value}</p>
+    </div>
+  );
+}
+
+function ShieldIcon() {
+  return (
+    <div className="flex h-8 w-8 shrink-0 items-center justify-center bg-orange-50 text-[#d97706]">
+      <CheckCircle2 size={16} />
+    </div>
+  );
+}

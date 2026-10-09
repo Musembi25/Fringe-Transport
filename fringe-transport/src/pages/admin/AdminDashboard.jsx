@@ -1,0 +1,1264 @@
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
+import {
+  ArrowRight,
+  CalendarDays,
+  Check,
+  CheckCircle2,
+  Clock3,
+  Download,
+  Eye,
+  History,
+  Mail,
+  MapPin,
+  Phone,
+  RefreshCw,
+  Save,
+  Search,
+  Trash2,
+  Users,
+  X,
+  XCircle,
+  CarFront,
+} from "lucide-react";
+import { supabase } from "../../lib/supabase";
+import jsPDF from "jspdf";
+import receiptLogo from "../../assets/logo-cropped.png?inline";
+
+
+function downloadAdminBookingReceipt(booking) {
+  const doc = new jsPDF();
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const left = 18;
+  const right = pageWidth - 18;
+  const usableWidth = right - left;
+  let y = 57;
+
+  const text = (value) =>
+    value === null || value === undefined || value === ""
+      ? "Not provided"
+      : String(value);
+
+  const moneyValue = (value) =>
+    value === null || value === undefined || value === ""
+      ? "To be confirmed"
+      : `KES ${Number(value).toLocaleString("en-KE", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        })}`;
+
+  const quoted =
+    booking.quoted_price === null ||
+    booking.quoted_price === undefined ||
+    booking.quoted_price === ""
+      ? null
+      : Number(booking.quoted_price);
+
+  const paid =
+    booking.amount_paid === null ||
+    booking.amount_paid === undefined ||
+    booking.amount_paid === ""
+      ? 0
+      : Number(booking.amount_paid);
+
+  const balance =
+    quoted === null ? null : Math.max(0, quoted - paid);
+
+  const date = (value) => {
+    if (!value) return "Not provided";
+    const parsed = new Date(
+      String(value).length === 10 ? `${value}T00:00:00` : value
+    );
+    return Number.isNaN(parsed.getTime())
+      ? String(value)
+      : new Intl.DateTimeFormat("en-KE", {
+          day: "numeric",
+          month: "long",
+          year: "numeric",
+        }).format(parsed);
+  };
+
+  const line = (label, value) => {
+    const labelWidth = 43;
+    const lines = doc.splitTextToSize(
+      text(value),
+      usableWidth - labelWidth - 4
+    );
+    const rowHeight = Math.max(7, lines.length * 5 + 2);
+
+    if (y + rowHeight > pageHeight - 25) {
+      doc.addPage();
+      y = 22;
+    }
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(105, 105, 105);
+    doc.text(label, left, y);
+
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(35, 35, 35);
+    doc.text(lines, left + labelWidth, y);
+
+    y += rowHeight;
+    doc.setDrawColor(235, 235, 235);
+    doc.line(left, y - 2, right, y - 2);
+  };
+
+  const heading = (title) => {
+    if (y + 15 > pageHeight - 25) {
+      doc.addPage();
+      y = 22;
+    }
+    y += 3;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(180, 83, 9);
+    doc.text(title.toUpperCase(), left, y);
+    y += 7;
+  };
+
+  // Brand header.
+  doc.setFillColor(23, 23, 23);
+  doc.rect(0, 0, pageWidth, 44, "F");
+  doc.setFillColor(217, 119, 6);
+  doc.rect(0, 0, 5, 44, "F");
+
+  doc.setFillColor(255, 255, 255);
+  doc.roundedRect(left, 5, 58, 34, 3, 3, "F");
+  doc.addImage(receiptLogo, "PNG", left + 3, 11, 52, 20.7);
+
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(20);
+  doc.setTextColor(255, 255, 255);
+  doc.text("FRINGE TRANSPORT", left + 66, 17);
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.setTextColor(235, 235, 235);
+  doc.text("PREMIUM TRANSPORT  |  NAIROBI, KENYA", left + 66, 25);
+  doc.text("+254 742 934 895  |  musembi.shad1@gmail.com", left + 66, 33);
+
+  // Document title and reference.
+  doc.setTextColor(25, 25, 25);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(15);
+  doc.text("BOOKING & PAYMENT RECEIPT", left, y);
+  y += 8;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.setTextColor(100, 100, 100);
+  doc.text(`Booking reference: ${text(booking.reference)}`, left, y);
+  doc.text(
+    `Issued: ${new Intl.DateTimeFormat("en-KE", {
+      dateStyle: "medium",
+    }).format(new Date())}`,
+    right,
+    y,
+    { align: "right" }
+  );
+  y += 7;
+
+  heading("Customer information");
+  line("Customer", booking.customer_name);
+  line("Phone", booking.customer_phone);
+  line("Email", booking.customer_email);
+
+  heading("Journey details");
+  line("Service", booking.service_name);
+  line("Pickup", booking.pickup_location);
+  line("Destination", booking.destination);
+  line("Travel date", date(booking.travel_date));
+  line("Travel time", booking.travel_time);
+  line("Trip type", booking.trip_type);
+  line("Passengers", booking.passengers);
+  line("Luggage", booking.luggage);
+  line("Flight number", booking.flight_number);
+  line("Additional stops", booking.additional_stops);
+  line("Booking status", booking.status);
+
+  if (booking.special_instructions) {
+    line("Trip instructions", booking.special_instructions);
+  }
+
+  heading("Financial summary");
+  line("Quoted fare", moneyValue(quoted));
+  line("Amount paid", moneyValue(paid));
+  line("Balance due", moneyValue(balance));
+  line(
+    "Payment status",
+    String(booking.payment_status || "unpaid").toUpperCase()
+  );
+
+  if (balance === null) {
+    y += 2;
+    doc.setFont("helvetica", "italic");
+    doc.setFontSize(8);
+    doc.setTextColor(130, 80, 20);
+    doc.text(
+      "The final fare is not yet recorded. Please confirm with Fringe Transport.",
+      left,
+      y
+    );
+    y += 7;
+  }
+
+  y += 5;
+  if (y > pageHeight - 32) {
+    doc.addPage();
+    y = 22;
+  }
+
+  doc.setFillColor(250, 247, 242);
+  doc.roundedRect(left, y - 4, usableWidth, 18, 2, 2, "F");
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(8.5);
+  doc.setTextColor(100, 65, 25);
+  doc.text(
+    paid > 0
+      ? "Payment information reflects the amount recorded by Fringe Transport."
+      : "Booking confirmation only — this document is not proof of payment.",
+    left + 4,
+    y + 3,
+    { maxWidth: usableWidth - 8 }
+  );
+  y += 24;
+
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(110, 110, 110);
+  doc.text(
+    "Thank you for choosing Fringe Transport. Contact us for any clarification.",
+    pageWidth / 2,
+    Math.min(y, pageHeight - 18),
+    { align: "center", maxWidth: usableWidth }
+  );
+
+  const safeReference = String(
+    booking.reference || booking.id || "booking"
+  ).replace(/[^a-zA-Z0-9_-]/g, "_");
+
+  doc.save(`Fringe-Transport-Receipt-${safeReference}.pdf`);
+}
+
+function getBookingShareMessage(booking) {
+  const date = booking.travel_date
+    ? new Intl.DateTimeFormat("en-KE", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }).format(new Date(`${booking.travel_date}T00:00:00`))
+    : "To be confirmed";
+
+  const money = (value) =>
+    value === null || value === undefined || value === ""
+      ? "To be confirmed"
+      : `KES ${Number(value).toLocaleString("en-KE")}`;
+
+  const quoted =
+    booking.quoted_price === null ||
+    booking.quoted_price === undefined ||
+    booking.quoted_price === ""
+      ? null
+      : Number(booking.quoted_price);
+
+  const paid = Number(booking.amount_paid || 0);
+  const balance = quoted === null ? null : Math.max(0, quoted - paid);
+
+  return [
+    `Hello ${booking.customer_name || "Customer"},`,
+    "",
+    "Here are your Fringe Transport booking details:",
+    `Reference: ${booking.reference || booking.id}`,
+    `Service: ${booking.service_name || "Not specified"}`,
+    `Pickup: ${booking.pickup_location || "Not specified"}`,
+    `Destination: ${booking.destination || "Not specified"}`,
+    `Travel date: ${date}`,
+    `Travel time: ${booking.travel_time || "To be confirmed"}`,
+    `Passengers: ${booking.passengers ?? "Not specified"}`,
+    `Booking status: ${booking.status || "pending"}`,
+    `Quoted fare: ${money(quoted)}`,
+    `Amount paid: ${money(paid)}`,
+    `Balance due: ${money(balance)}`,
+    `Payment status: ${booking.payment_status || "unpaid"}`,
+    "",
+    "For assistance, contact Fringe Transport on +254 742 934 895.",
+    "Thank you for choosing Fringe Transport.",
+  ].join("\n");
+}
+
+const statuses = ["pending", "confirmed", "completed", "cancelled"];
+
+const statusStyles = {
+  pending: "bg-amber-50 text-amber-800 ring-amber-200",
+  confirmed: "bg-blue-50 text-blue-800 ring-blue-200",
+  completed: "bg-emerald-50 text-emerald-800 ring-emerald-200",
+  cancelled: "bg-red-50 text-red-700 ring-red-200",
+};
+
+function field(row, ...keys) {
+  for (const key of keys) {
+    if (row?.[key] !== undefined && row?.[key] !== null && row[key] !== "") {
+      return row[key];
+    }
+  }
+  return "";
+}
+
+function displayDate(value) {
+  if (!value) return "—";
+  const parsed = new Date(
+    String(value).length === 10 ? `${value}T00:00:00` : value
+  );
+  return Number.isNaN(parsed.getTime())
+    ? String(value)
+    : new Intl.DateTimeFormat("en-KE", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }).format(parsed);
+}
+
+function displayDateTime(value) {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? String(value)
+    : new Intl.DateTimeFormat("en-KE", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(parsed);
+}
+
+function formatStatus(value) {
+  return String(value || "unknown")
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function money(value) {
+  if (value === null || value === undefined || value === "") return "Not set";
+  return new Intl.NumberFormat("en-KE", {
+    style: "currency",
+    currency: "KES",
+    maximumFractionDigits: 2,
+  }).format(Number(value) || 0);
+}
+
+function MetricCard({ title, value, note, icon: Icon, accent, loading }) {
+  return (
+    <div className="rounded-2xl border border-neutral-200/80 bg-white p-5 shadow-[0_2px_12px_rgba(0,0,0,0.025)] sm:p-6">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-neutral-500">{title}</p>
+          <p className="mt-4 text-3xl font-semibold tracking-tight text-[#171717]">
+            {loading ? "—" : value}
+          </p>
+        </div>
+        <span className={`flex h-11 w-11 items-center justify-center rounded-xl ${accent}`}>
+          <Icon size={20} strokeWidth={1.8} />
+        </span>
+      </div>
+      <p className="mt-4 text-xs text-neutral-500">{note}</p>
+    </div>
+  );
+}
+
+function StatusBadge({ status }) {
+  const value = String(status || "pending").toLowerCase();
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${
+        statusStyles[value] || "bg-neutral-100 text-neutral-700 ring-neutral-200"
+      }`}
+    >
+      {formatStatus(value)}
+    </span>
+  );
+}
+
+function DetailRow({ label, children }) {
+  return (
+    <div className="border-b border-neutral-100 py-3 last:border-b-0">
+      <p className="text-[10px] font-bold uppercase tracking-[0.13em] text-neutral-400">
+        {label}
+      </p>
+      <div className="mt-1.5 break-words text-sm leading-6 text-neutral-800">
+        {children || "—"}
+      </div>
+    </div>
+  );
+}
+
+function FormLabel({ children }) {
+  return (
+    <label className="mb-1.5 block text-xs font-semibold text-neutral-600">
+      {children}
+    </label>
+  );
+}
+
+export default function AdminDashboard() {
+  const location = useLocation();
+  const bookingsPage = location.pathname.endsWith("/bookings");
+
+  const [bookings, setBookings] = useState([]);
+  const [drivers, setDrivers] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
+  const [counts, setCounts] = useState({
+    total: 0,
+    today: 0,
+    pending: 0,
+    confirmed: 0,
+    completed: 0,
+    cancelled: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all");
+  const [updatingId, setUpdatingId] = useState("");
+  const [deletingId, setDeletingId] = useState("");
+  const [bookingToDelete, setBookingToDelete] = useState(null);
+  const [actionMessage, setActionMessage] = useState("");
+  const [selectedBooking, setSelectedBooking] = useState(null);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [detailError, setDetailError] = useState("");
+  const [detailSaving, setDetailSaving] = useState(false);
+  const [detailStatus, setDetailStatus] = useState("");
+  const [detailMessage, setDetailMessage] = useState("");
+  const [statusNote, setStatusNote] = useState("");
+  const [adminNotes, setAdminNotes] = useState("");
+  const [driverId, setDriverId] = useState("");
+  const [vehicleId, setVehicleId] = useState("");
+  const [quotedPrice, setQuotedPrice] = useState("");
+  const [amountPaid, setAmountPaid] = useState("");
+  const [paymentStatus, setPaymentStatus] = useState("unpaid");
+
+  const loadData = useCallback(async (refresh = false) => {
+    setError("");
+    if (refresh) setRefreshing(true);
+    else setLoading(true);
+
+    try {
+      const today = new Date();
+      const dayStart = [
+        today.getFullYear(),
+        String(today.getMonth() + 1).padStart(2, "0"),
+        String(today.getDate()).padStart(2, "0"),
+      ].join("-");
+      const tomorrow = new Date(today);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      const dayEnd = [
+        tomorrow.getFullYear(),
+        String(tomorrow.getMonth() + 1).padStart(2, "0"),
+        String(tomorrow.getDate()).padStart(2, "0"),
+      ].join("-");
+
+      const [listResult, totalResult, todayResult, ...statusResults] =
+        await Promise.all([
+          supabase
+            .from("bookings")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(200),
+          supabase.from("bookings").select("id", { count: "exact", head: true }),
+          supabase
+            .from("bookings")
+            .select("id", { count: "exact", head: true })
+            .gte("travel_date", dayStart)
+            .lt("travel_date", dayEnd),
+          ...statuses.map((status) =>
+            supabase
+              .from("bookings")
+              .select("id", { count: "exact", head: true })
+              .eq("status", status)
+          ),
+        ]);
+
+      if (listResult.error) throw listResult.error;
+      if (totalResult.error) throw totalResult.error;
+      if (todayResult.error) throw todayResult.error;
+      for (const result of statusResults) {
+        if (result.error) throw result.error;
+      }
+
+      setBookings(listResult.data || []);
+      setCounts({
+        total: totalResult.count || 0,
+        today: todayResult.count || 0,
+        pending: statusResults[0].count || 0,
+        confirmed: statusResults[1].count || 0,
+        completed: statusResults[2].count || 0,
+        cancelled: statusResults[3].count || 0,
+      });
+
+      const [driverResult, vehicleResult] = await Promise.all([
+        supabase
+          .from("drivers")
+          .select("id, full_name, phone, status")
+          .order("full_name"),
+        supabase
+          .from("vehicles")
+          .select("id, registration_number, make, model, status")
+          .order("registration_number"),
+      ]);
+
+      if (!driverResult.error) setDrivers(driverResult.data || []);
+      if (!vehicleResult.error) setVehicles(vehicleResult.data || []);
+    } catch (err) {
+      setError(
+        err.message ||
+          "Could not load bookings. Check your Supabase connection and administrator policies."
+      );
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const visibleBookings = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    return bookings.filter((booking) => {
+      const status = String(booking.status || "pending").toLowerCase();
+      const matchesFilter = filter === "all" || status === filter;
+      const searchable = [
+        booking.reference,
+        booking.customer_name,
+        booking.customer_phone,
+        booking.customer_email,
+        booking.pickup_location,
+        booking.destination,
+        booking.service_name,
+      ]
+        .join(" ")
+        .toLowerCase();
+
+      return matchesFilter && (!query || searchable.includes(query));
+    });
+  }, [bookings, filter, search]);
+
+  async function openBooking(booking) {
+    setSelectedBooking(booking);
+    setDetailError("");
+    setDetailStatus("");
+    setDetailMessage("");
+    setHistoryError("");
+    setHistoryRows([]);
+    setStatusNote("");
+    setAdminNotes(booking.admin_notes || "");
+    setDriverId(booking.driver_id || "");
+    setVehicleId(booking.vehicle_id || "");
+    setQuotedPrice(
+      booking.quoted_price === null || booking.quoted_price === undefined
+        ? ""
+        : String(booking.quoted_price)
+    );
+    setAmountPaid(
+      booking.amount_paid === null || booking.amount_paid === undefined
+        ? ""
+        : String(booking.amount_paid)
+    );
+    setPaymentStatus(booking.payment_status || "unpaid");
+    setHistoryLoading(true);
+
+    const { data, error: historyQueryError } = await supabase
+      .from("booking_status_history")
+      .select("*")
+      .eq("booking_id", booking.id)
+      .order("created_at", { ascending: false });
+
+    if (historyQueryError) {
+      setHistoryError(historyQueryError.message);
+    } else {
+      setHistoryRows(data || []);
+    }
+    setHistoryLoading(false);
+  }
+
+  async function updateStatus(booking, nextStatus, note = "") {
+    if (String(booking.status).toLowerCase() === nextStatus) return true;
+
+    setUpdatingId(booking.id);
+    setError("");
+    setDetailError("");
+
+    try {
+      const { data, error: rpcError } = await supabase.rpc(
+        "change_fringe_booking_status",
+        {
+          p_booking_id: booking.id,
+          p_new_status: nextStatus,
+          p_note: note,
+        }
+      );
+
+      if (rpcError) throw rpcError;
+
+      setBookings((current) =>
+        current.map((item) =>
+          item.id === booking.id
+            ? { ...item, status: data?.status || nextStatus }
+            : item
+        )
+      );
+      setSelectedBooking((current) =>
+        current?.id === booking.id
+          ? { ...current, status: data?.status || nextStatus }
+          : current
+      );
+      setDetailMessage("Status updated and history recorded.");
+      setStatusNote("");
+      await loadData(true);
+
+      const { data: refreshedHistory, error: refreshedHistoryError } =
+        await supabase
+          .from("booking_status_history")
+          .select("*")
+          .eq("booking_id", booking.id)
+          .order("created_at", { ascending: false });
+
+      if (!refreshedHistoryError) setHistoryRows(refreshedHistory || []);
+      else setHistoryError(refreshedHistoryError.message);
+
+      return true;
+    } catch (err) {
+      const message = err.message || "Could not update booking status.";
+      setDetailError(message);
+      setError(message);
+      return false;
+    } finally {
+      setUpdatingId("");
+    }
+  }
+
+  async function saveBookingDetails(event) {
+    event.preventDefault();
+    if (!selectedBooking) return;
+
+    setDetailSaving(true);
+    setDetailError("");
+    setDetailMessage("");
+
+    try {
+      const price = quotedPrice.trim() === "" ? null : Number(quotedPrice);
+      const paid = amountPaid.trim() === "" ? null : Number(amountPaid);
+
+      if (price !== null && (!Number.isFinite(price) || price < 0)) {
+        throw new Error("Quoted price must be a valid non-negative amount.");
+      }
+      if (paid !== null && (!Number.isFinite(paid) || paid < 0)) {
+        throw new Error("Amount paid must be a valid non-negative amount.");
+      }
+
+      const { data, error: updateError } = await supabase
+        .from("bookings")
+        .update({
+          driver_id: driverId || null,
+          vehicle_id: vehicleId || null,
+          admin_notes: adminNotes.trim() || null,
+          quoted_price: price,
+          amount_paid: paid,
+          payment_status: paymentStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", selectedBooking.id)
+        .select("*")
+        .single();
+
+      if (updateError) throw updateError;
+
+      setBookings((current) =>
+        current.map((item) => (item.id === data.id ? data : item))
+      );
+      setSelectedBooking(data);
+      setDetailMessage("Booking details saved successfully.");
+    } catch (err) {
+      setDetailError(err.message || "Could not save booking details.");
+    } finally {
+      setDetailSaving(false);
+    }
+  }
+
+  async function deleteBooking() {
+    if (!bookingToDelete) return;
+
+    const booking = bookingToDelete;
+    setDeletingId(booking.id);
+    setError("");
+    setActionMessage("");
+
+    try {
+      const { data, error: deleteError } = await supabase
+        .from("bookings")
+        .delete()
+        .eq("id", booking.id)
+        .select("id")
+        .maybeSingle();
+
+      if (deleteError) throw deleteError;
+      if (!data) {
+        throw new Error(
+          "This booking could not be deleted. It may already be gone or you may not have permission."
+        );
+      }
+
+      setBookings((current) => current.filter((item) => item.id !== booking.id));
+      if (selectedBooking?.id === booking.id) setSelectedBooking(null);
+      setBookingToDelete(null);
+      setActionMessage(
+        `Booking ${booking.reference || `#${String(booking.id).slice(0, 8)}`} deleted.`
+      );
+      await loadData(true);
+    } catch (err) {
+      setError(
+        err.code === "42501"
+          ? `Supabase denied delete access. Apply the database migration supabase/migrations/20261009112000_admin_booking_delete_policy.sql, then try again. Details: ${err.message}`
+          : err.message || "Could not delete this booking."
+      );
+    } finally {
+      setDeletingId("");
+    }
+  }
+
+  function exportCsv() {
+    const columns = [
+      ["Reference", (b) => b.reference],
+      ["Customer", (b) => b.customer_name],
+      ["Phone", (b) => b.customer_phone],
+      ["Email", (b) => b.customer_email],
+      ["Pickup", (b) => b.pickup_location],
+      ["Destination", (b) => b.destination],
+      ["Travel date", (b) => b.travel_date],
+      ["Travel time", (b) => b.travel_time],
+      ["Service", (b) => b.service_name],
+      ["Status", (b) => b.status],
+      ["Quoted price (KES)", (b) => b.quoted_price],
+      ["Amount paid (KES)", (b) => b.amount_paid],
+      ["Payment status", (b) => b.payment_status],
+    ];
+
+    const escape = (value) =>
+      `"${String(value ?? "").replaceAll('"', '""')}"`;
+
+    const csv = [
+      columns.map(([label]) => escape(label)).join(","),
+      ...visibleBookings.map((booking) =>
+        columns.map(([, getValue]) => escape(getValue(booking))).join(",")
+      ),
+    ].join("\r\n");
+
+    const url = URL.createObjectURL(
+      new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" })
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `fringe-bookings-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  }
+
+  const metrics = [
+    {
+      title: "Bookings today",
+      value: counts.today,
+      note: "Trips scheduled for today",
+      icon: CalendarDays,
+      accent: "bg-orange-50 text-[#B45309]",
+    },
+    {
+      title: "Awaiting action",
+      value: counts.pending,
+      note: "Requests pending confirmation",
+      icon: Clock3,
+      accent: "bg-amber-50 text-amber-700",
+    },
+    {
+      title: "Confirmed",
+      value: counts.confirmed,
+      note: "Bookings confirmed",
+      icon: CheckCircle2,
+      accent: "bg-blue-50 text-blue-700",
+    },
+    {
+      title: "Completed",
+      value: counts.completed,
+      note: "Successfully completed trips",
+      icon: Check,
+      accent: "bg-emerald-50 text-emerald-700",
+    },
+  ];
+
+  return (
+    <div>
+      <div className="mb-8 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+        <div>
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.22em] text-[#B45309]">
+            {bookingsPage ? "Operations / Bookings" : "Operations overview"}
+          </p>
+          <h1 className="text-3xl font-semibold tracking-tight sm:text-[34px]">
+            {bookingsPage ? "Booking management" : "Good to see you."}
+          </h1>
+          <p className="mt-2 max-w-xl text-sm leading-6 text-neutral-500">
+            {bookingsPage
+              ? "Review customer requests, manage trip status and export your booking records."
+              : "Here is the current picture of your transport operations."}
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => loadData(true)}
+            disabled={refreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm font-semibold transition hover:border-neutral-300 disabled:opacity-50"
+          >
+            <RefreshCw size={15} className={refreshing ? "animate-spin" : ""} />
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={exportCsv}
+            disabled={visibleBookings.length === 0}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#171717] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#333] disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Download size={15} />
+            Export CSV
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div role="alert" className="mb-6 rounded-xl border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">
+          <p className="font-semibold">There is a problem with this request.</p>
+          <p>{error}</p>
+          <button type="button" onClick={() => loadData(true)} className="mt-2 font-semibold underline">
+            Reload data
+          </button>
+        </div>
+      )}
+      {actionMessage && (
+        <div role="status" className="mb-6 flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm font-medium text-emerald-800">
+          <CheckCircle2 size={17} />
+          {actionMessage}
+        </div>
+      )}
+
+      {!bookingsPage && (
+        <>
+          <div className="mb-7 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {metrics.map((metric) => (
+              <MetricCard key={metric.title} {...metric} loading={loading} />
+            ))}
+          </div>
+
+          <div className="mb-7 grid grid-cols-1 gap-4 lg:grid-cols-3">
+            <div className="rounded-2xl bg-[#171717] p-6 text-white sm:p-7 lg:col-span-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-white/45">
+                Booking activity
+              </p>
+              <p className="mt-3 text-3xl font-semibold">{loading ? "—" : counts.total}</p>
+              <p className="mt-2 text-sm text-white/55">Total recorded bookings</p>
+              <div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {[
+                  ["Pending", counts.pending, "bg-amber-400"],
+                  ["Confirmed", counts.confirmed, "bg-blue-400"],
+                  ["Completed", counts.completed, "bg-emerald-400"],
+                  ["Cancelled", counts.cancelled, "bg-red-400"],
+                ].map(([label, value, color]) => (
+                  <div key={label} className="rounded-xl border border-white/10 bg-white/[0.05] p-3">
+                    <span className={`mb-3 block h-1 w-7 rounded-full ${color}`} />
+                    <p className="text-xl font-semibold">{loading ? "—" : value}</p>
+                    <p className="mt-1 text-[11px] text-white/50">{label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="flex flex-col justify-between rounded-2xl border border-neutral-200/80 bg-white p-6 sm:p-7">
+              <div>
+                <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-50 text-[#B45309]">
+                  <CalendarDays size={20} />
+                </span>
+                <h2 className="mt-5 text-lg font-semibold">Stay on top of requests</h2>
+                <p className="mt-2 text-sm leading-6 text-neutral-500">
+                  Review new bookings and keep customers informed of their trip status.
+                </p>
+              </div>
+              <Link to="/admin/bookings" className="mt-7 inline-flex items-center gap-2 text-sm font-bold text-[#B45309] hover:text-[#D97706]">
+                Manage bookings <ArrowRight size={16} />
+              </Link>
+            </div>
+          </div>
+        </>
+      )}
+
+      <section className="overflow-hidden rounded-2xl border border-neutral-200/80 bg-white shadow-[0_2px_12px_rgba(0,0,0,0.025)]">
+        <div className="flex flex-col gap-4 border-b border-neutral-100 p-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div>
+            <h2 className="text-base font-semibold">{bookingsPage ? "All bookings" : "Recent bookings"}</h2>
+            <p className="mt-1 text-xs text-neutral-500">
+              {loading ? "Loading records..." : `${visibleBookings.length} displayed · ${counts.total} total`}
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <div className="relative">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400" />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search bookings..."
+                aria-label="Search bookings"
+                className="w-full rounded-xl border border-neutral-200 py-2.5 pl-9 pr-3 text-sm outline-none focus:border-[#D97706] sm:w-56"
+              />
+            </div>
+            <select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filter by status" className="rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#D97706]">
+              <option value="all">All statuses</option>
+              {statuses.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="space-y-3 p-6">{[1, 2, 3, 4].map((item) => <div key={item} className="h-14 animate-pulse rounded-xl bg-neutral-50" />)}</div>
+        ) : visibleBookings.length === 0 ? (
+          <div className="px-5 py-16 text-center sm:px-8">
+            <CalendarDays size={24} className="mx-auto text-neutral-400" />
+            <h3 className="mt-4 text-sm font-semibold">{bookings.length === 0 ? "No bookings yet" : "No matching bookings"}</h3>
+            <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-neutral-500">
+              {bookings.length === 0 ? "Customer booking requests will appear here when submitted through your website." : "Try another search term or status filter."}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] border-collapse text-left">
+              <thead>
+                <tr className="border-b border-neutral-100 bg-neutral-50/70">
+                  {["Booking / Customer", "Journey", "Travel date", "Status", "Actions"].map((label) => (
+                    <th key={label} className="px-5 py-3.5 text-[10px] font-bold uppercase tracking-[0.12em] text-neutral-500 sm:px-6">{label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-neutral-100">
+                {visibleBookings.map((booking) => (
+                  <tr key={booking.id} className="transition hover:bg-neutral-50/70">
+                    <td className="px-5 py-4 sm:px-6">
+                      <p className="text-xs font-bold text-[#B45309]">{booking.reference || `#${booking.id.slice(0, 8)}`}</p>
+                      <p className="mt-1.5 max-w-[190px] truncate text-sm font-semibold">{booking.customer_name || "Customer name unavailable"}</p>
+                      {booking.customer_phone && <a href={`tel:${booking.customer_phone}`} className="mt-1 inline-flex items-center gap-1.5 text-xs text-neutral-500 hover:text-[#B45309]"><Phone size={12} />{booking.customer_phone}</a>}
+                    </td>
+                    <td className="px-5 py-4 sm:px-6">
+                      <p className="flex max-w-[250px] items-center gap-1.5 text-xs text-neutral-700"><MapPin size={13} className="shrink-0 text-[#D97706]" /><span className="truncate">{booking.pickup_location || "Pickup not recorded"}</span></p>
+                      <p className="mt-2 max-w-[250px] truncate pl-5 text-xs text-neutral-500">To: {booking.destination || "Destination not recorded"}</p>
+                    </td>
+                    <td className="px-5 py-4 sm:px-6">
+                      <p className="whitespace-nowrap text-sm font-medium">{displayDate(booking.travel_date)}</p>
+                      <p className="mt-1 text-xs text-neutral-500">{booking.travel_time || "Time not set"}</p>
+                    </td>
+                    <td className="px-5 py-4 sm:px-6"><StatusBadge status={booking.status} /></td>
+                    <td className="px-5 py-4 sm:px-6">
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={String(booking.status || "pending").toLowerCase()}
+                          disabled={updatingId === booking.id}
+                          onChange={(event) => updateStatus(booking, event.target.value)}
+                          aria-label={`Update status for ${booking.reference || booking.id}`}
+                          className="max-w-[145px] rounded-lg border border-neutral-200 bg-white px-2.5 py-2 text-xs font-medium outline-none focus:border-[#D97706] disabled:opacity-50"
+                        >
+                          {statuses.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+                        </select>
+                        <button type="button" onClick={() => openBooking(booking)} className="inline-flex items-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-2 text-xs font-semibold hover:border-[#D97706] hover:text-[#B45309]">
+                          <Eye size={14} /> Details
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setBookingToDelete(booking)}
+                          disabled={deletingId === booking.id || updatingId === booking.id}
+                          aria-label={`Delete booking ${booking.reference || booking.id}`}
+                          title="Delete booking"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-600 transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                      {updatingId === booking.id && <span className="mt-1 inline-block text-xs text-neutral-400">Saving status…</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3 border-t border-neutral-100 px-5 py-4 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <span>Showing up to 200 most recent records. Summary totals are counted from the database.</span>
+          {!bookingsPage && <Link to="/admin/bookings" className="inline-flex items-center gap-1.5 font-semibold text-[#B45309] hover:text-[#D97706]">Open bookings <ArrowRight size={14} /></Link>}
+        </div>
+      </section>
+
+      <p className="mt-7 text-center text-[11px] text-neutral-400">Fringe Transport · Operations dashboard</p>
+
+      {selectedBooking && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 backdrop-blur-sm sm:items-center sm:p-5" onMouseDown={(event) => { if (event.target === event.currentTarget && !detailSaving) setSelectedBooking(null); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="booking-detail-title" className="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-t-2xl bg-white shadow-2xl sm:rounded-2xl">
+            <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-neutral-200 bg-white/95 px-5 py-4 backdrop-blur sm:px-7">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#B45309]">Booking details</p>
+                <h2 id="booking-detail-title" className="mt-1 text-xl font-semibold">{selectedBooking.reference || selectedBooking.id}</h2>
+                <div className="mt-2"><StatusBadge status={selectedBooking.status} /></div>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBookingToDelete(selectedBooking)}
+                  disabled={detailSaving || deletingId === selectedBooking.id}
+                  className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-xs font-semibold text-red-600 transition hover:bg-red-50 hover:text-red-700 disabled:opacity-50"
+                >
+                  <Trash2 size={14} /> Delete
+                </button>
+                <button type="button" aria-label="Close booking details" onClick={() => setSelectedBooking(null)} disabled={detailSaving} className="rounded-lg border border-neutral-200 p-2 text-neutral-600 hover:bg-neutral-50 disabled:opacity-50"><X size={18} /></button>
+              </div>
+            </div>
+
+            <div className="grid gap-7 p-5 sm:p-7 lg:grid-cols-[1.1fr_0.9fr]">
+              <div className="space-y-6">
+                <section>
+                  <h3 className="mb-2 text-sm font-semibold">Customer and journey</h3>
+                  <div className="grid gap-x-6 sm:grid-cols-2">
+                    <DetailRow label="Customer">{selectedBooking.customer_name}</DetailRow>
+                    <DetailRow label="Phone">{selectedBooking.customer_phone ? <a className="text-[#B45309] hover:underline" href={`tel:${selectedBooking.customer_phone}`}>{selectedBooking.customer_phone}</a> : "—"}</DetailRow>
+                    <DetailRow label="Email">{selectedBooking.customer_email ? <a className="text-[#B45309] hover:underline" href={`mailto:${selectedBooking.customer_email}`}><Mail size={13} className="mr-1 inline" />{selectedBooking.customer_email}</a> : "—"}</DetailRow>
+                    <DetailRow label="Service">{selectedBooking.service_name}</DetailRow>
+                    <DetailRow label="Pickup">{selectedBooking.pickup_location}</DetailRow>
+                    <DetailRow label="Destination">{selectedBooking.destination}</DetailRow>
+                    <DetailRow label="Travel date">{displayDate(selectedBooking.travel_date)}</DetailRow>
+                    <DetailRow label="Travel time">{selectedBooking.travel_time}</DetailRow>
+                    <DetailRow label="Trip type">{selectedBooking.trip_type}</DetailRow>
+                    <DetailRow label="Passengers">{selectedBooking.passengers}</DetailRow>
+                    <DetailRow label="Luggage">{selectedBooking.luggage}</DetailRow>
+                    <DetailRow label="Flight number">{selectedBooking.flight_number}</DetailRow>
+                    <DetailRow label="Additional stops">{selectedBooking.additional_stops}</DetailRow>
+                    <DetailRow label="Booking created">{displayDateTime(selectedBooking.created_at)}</DetailRow>
+                  </div>
+                  <DetailRow label="Customer instructions">{selectedBooking.special_instructions}</DetailRow>
+                </section>
+
+                <section className="rounded-xl border border-neutral-200 p-4">
+                  <div className="mb-3 flex items-center gap-2">
+                    <History size={17} className="text-[#B45309]" />
+                    <h3 className="text-sm font-semibold">Status history</h3>
+                  </div>
+                  {historyLoading ? (
+                    <p className="text-sm text-neutral-500">Loading history…</p>
+                  ) : historyError ? (
+                    <p className="text-sm text-red-600">{historyError}</p>
+                  ) : historyRows.length === 0 ? (
+                    <p className="text-sm leading-6 text-neutral-500">No status history has been recorded for this booking yet. Future changes made here will be recorded.</p>
+                  ) : (
+                    <ol className="space-y-4">
+                      {historyRows.map((item) => (
+                        <li key={item.id} className="border-l-2 border-orange-200 pl-3">
+                          <p className="text-sm font-semibold">{formatStatus(item.old_status)} <ArrowRight size={13} className="mx-1 inline text-neutral-400" /> {formatStatus(item.new_status)}</p>
+                          <p className="mt-1 text-xs text-neutral-500">{displayDateTime(item.created_at)}</p>
+                          {item.note && <p className="mt-2 text-sm leading-5 text-neutral-700">{item.note}</p>}
+                          {item.changed_by && <p className="mt-1 text-[11px] text-neutral-400">Admin ID: {item.changed_by}</p>}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                </section>
+              </div>
+
+              <div className="space-y-6">
+                <form onSubmit={async (event) => { event.preventDefault(); await updateStatus(selectedBooking, detailStatus || selectedBooking.status, statusNote); }} className="rounded-xl border border-neutral-200 p-4 sm:p-5">
+                  <h3 className="text-sm font-semibold">Update trip status</h3>
+                  <p className="mt-1 text-xs leading-5 text-neutral-500">Every status change is recorded in the booking history.</p>
+                  <div className="mt-4">
+                    <FormLabel>New status</FormLabel>
+                    <select value={detailStatus || String(selectedBooking.status || "pending").toLowerCase()} onChange={(event) => setDetailStatus(event.target.value)} className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#D97706]">
+                      {statuses.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+                    </select>
+                  </div>
+                  <div className="mt-3">
+                    <FormLabel>History note (optional)</FormLabel>
+                    <textarea value={statusNote} onChange={(event) => setStatusNote(event.target.value)} rows={2} maxLength={1000} placeholder="e.g. Customer confirmed pickup time by phone" className="w-full resize-y rounded-xl border border-neutral-200 px-3 py-2.5 text-sm outline-none focus:border-[#D97706]" />
+                  </div>
+                  <button type="submit" disabled={updatingId === selectedBooking.id || (detailStatus || selectedBooking.status) === selectedBooking.status} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#171717] px-4 py-2.5 text-sm font-semibold text-white hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40">
+                    <History size={15} /> {updatingId === selectedBooking.id ? "Updating…" : "Save status change"}
+                  </button>
+                </form>
+
+                <form onSubmit={saveBookingDetails} className="rounded-xl border border-neutral-200 p-4 sm:p-5">
+                  <div className="mb-4 flex items-center gap-2">
+                    <CarFront size={18} className="text-[#B45309]" />
+                    <h3 className="text-sm font-semibold">Operations and payment</h3>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div>
+                      <FormLabel>Assign driver</FormLabel>
+                      <select value={driverId} onChange={(event) => setDriverId(event.target.value)} className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#D97706]">
+                        <option value="">Unassigned</option>
+                        {drivers.map((driver) => <option key={driver.id} value={driver.id}>{driver.full_name}{driver.status ? ` · ${formatStatus(driver.status)}` : ""}{driver.phone ? ` · ${driver.phone}` : ""}</option>)}
+                      </select>
+                      {drivers.length === 0 && <p className="mt-1 text-xs text-neutral-400">No drivers found. Add a driver before assigning.</p>}
+                    </div>
+
+                    <div>
+                      <FormLabel>Assign vehicle</FormLabel>
+                      <select value={vehicleId} onChange={(event) => setVehicleId(event.target.value)} className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#D97706]">
+                        <option value="">Unassigned</option>
+                        {vehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.registration_number} — {[vehicle.make, vehicle.model].filter(Boolean).join(" ") || "Vehicle"}{vehicle.status ? ` · ${formatStatus(vehicle.status)}` : ""}</option>)}
+                      </select>
+                      {vehicles.length === 0 && <p className="mt-1 text-xs text-neutral-400">No vehicles found. Add a vehicle before assigning.</p>}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <FormLabel>Quoted price (KES)</FormLabel>
+                        <input type="number" min="0" step="0.01" value={quotedPrice} onChange={(event) => setQuotedPrice(event.target.value)} placeholder="0.00" className="w-full rounded-xl border border-neutral-200 px-3 py-2.5 text-sm outline-none focus:border-[#D97706]" />
+                      </div>
+                      <div>
+                        <FormLabel>Amount paid (KES)</FormLabel>
+                        <input type="number" min="0" step="0.01" value={amountPaid} onChange={(event) => setAmountPaid(event.target.value)} placeholder="0.00" className="w-full rounded-xl border border-neutral-200 px-3 py-2.5 text-sm outline-none focus:border-[#D97706]" />
+                      </div>
+                    </div>
+
+                    <div>
+                      <FormLabel>Payment status</FormLabel>
+                      <select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)} className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#D97706]">
+                        {["unpaid", "partial", "paid", "refunded"].map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
+                      </select>
+                    </div>
+
+                    <div>
+                      <FormLabel>Internal admin notes</FormLabel>
+                      <textarea value={adminNotes} onChange={(event) => setAdminNotes(event.target.value)} rows={4} maxLength={5000} placeholder="Internal notes for Fringe Transport staff. Not shown to the customer." className="w-full resize-y rounded-xl border border-neutral-200 px-3 py-2.5 text-sm leading-6 outline-none focus:border-[#D97706]" />
+                    </div>
+                  </div>
+
+                  {detailError && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-xs leading-5 text-red-700">{detailError}</p>}
+                  {detailMessage && <p role="status" className="mt-3 rounded-lg bg-emerald-50 p-3 text-xs leading-5 text-emerald-800">{detailMessage}</p>}
+
+                  <button type="submit" disabled={detailSaving} className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#D97706] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#B45309] disabled:cursor-not-allowed disabled:opacity-50">
+                    <Save size={16} /> {detailSaving ? "Saving details…" : "Save booking details"}
+                  </button>
+                </form>
+
+                <div className="rounded-xl bg-neutral-50 p-4">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.13em] text-neutral-400">Financial summary</p>
+                  <div className="mt-3 flex items-center justify-between gap-3 text-sm">
+                    <span className="text-neutral-500">Quoted price</span>
+                    <span className="font-semibold">{money(selectedBooking.quoted_price)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                    <span className="text-neutral-500">Amount paid</span>
+                    <span className="font-semibold">{money(selectedBooking.amount_paid)}</span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3 text-sm">
+                    <span className="text-neutral-500">Payment status</span>
+                    <span className="font-semibold">{formatStatus(selectedBooking.payment_status || "unpaid")}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap justify-between gap-3 border-t border-neutral-200 bg-neutral-50 px-5 py-4 sm:px-7">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => downloadAdminBookingReceipt(selectedBooking)}
+                  className="inline-flex items-center gap-2 rounded-lg bg-[#171717] px-3 py-2 text-xs font-semibold text-white transition hover:bg-[#B45309]"
+                >
+                  <Download size={14} /> Download receipt PDF
+                </button>
+                {selectedBooking.customer_phone && (
+                  <a
+                    href={`https://wa.me/${String(selectedBooking.customer_phone).replace(/\D/g, "")}?text=${encodeURIComponent(getBookingShareMessage(selectedBooking))}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold hover:border-[#D97706]"
+                  >
+                    <Phone size={14} /> WhatsApp details
+                  </a>
+                )}
+                {selectedBooking.customer_email && (
+                  <a
+                    href={`mailto:${selectedBooking.customer_email}?subject=${encodeURIComponent(`Fringe Transport receipt - ${selectedBooking.reference || selectedBooking.id}`)}&body=${encodeURIComponent(getBookingShareMessage(selectedBooking) + "\n\nPlease find the booking receipt attached if you are sending the PDF separately.")}`}
+                    className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold hover:border-[#D97706]"
+                  >
+                    <Mail size={14} /> Email details
+                  </a>
+                )}
+                {selectedBooking.customer_phone && <a href={`tel:${selectedBooking.customer_phone}`} className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold hover:border-[#D97706]"><Phone size={14} /> Call</a>}
+                {selectedBooking.customer_phone && <a href={`tel:${selectedBooking.customer_phone}`} className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold hover:border-[#D97706]"><Phone size={14} /> Call</a>}
+                {selectedBooking.customer_email && <a href={`mailto:${selectedBooking.customer_email}`} className="inline-flex items-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-xs font-semibold hover:border-[#D97706]"><Mail size={14} /> Email</a>}
+              </div>
+              <button type="button" onClick={() => setSelectedBooking(null)} className="rounded-lg bg-[#171717] px-4 py-2 text-xs font-semibold text-white hover:bg-neutral-800">Close details</button>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {bookingToDelete && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !deletingId) {
+              setBookingToDelete(null);
+            }
+          }}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="delete-booking-title"
+            aria-describedby="delete-booking-description"
+            className="w-full max-w-md rounded-2xl border border-neutral-200 bg-white p-6 shadow-2xl"
+          >
+            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-50 text-red-600">
+              <Trash2 size={19} />
+            </div>
+            <h2 id="delete-booking-title" className="mt-4 text-lg font-semibold text-neutral-900">
+              Delete this booking?
+            </h2>
+            <p id="delete-booking-description" className="mt-2 text-sm leading-6 text-neutral-600">
+              Booking{" "}
+              <span className="font-semibold text-neutral-800">
+                {bookingToDelete.reference || `#${String(bookingToDelete.id).slice(0, 8)}`}
+              </span>
+              {bookingToDelete.customer_name ? ` for ${bookingToDelete.customer_name}` : ""} will be permanently removed. This action cannot be undone.
+            </p>
+            <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setBookingToDelete(null)}
+                disabled={Boolean(deletingId)}
+                className="rounded-xl border border-neutral-200 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-50 disabled:opacity-50"
+              >
+                Keep booking
+              </button>
+              <button
+                type="button"
+                onClick={deleteBooking}
+                disabled={Boolean(deletingId)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                <Trash2 size={15} />
+                {deletingId ? "Deleting…" : "Delete booking"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}

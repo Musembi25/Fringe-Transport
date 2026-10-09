@@ -1,0 +1,139 @@
+.ft-admin {
+  min-height: 100vh;
+  background-image:
+    linear-gradient(
+      115deg,
+      rgba(247, 246, 242, 0.7) 0%,
+      rgba(247, 246, 242, 0.82) 48%,
+      rgba(247, 246, 242, 0.72) 100%
+    ),
+    var(--admin-site-image);
+  background-position: center, center 54%;
+  background-size: cover;
+  background-attachment: fixed;
+}
+
+.ft-admin > div > header {
+  background-color: rgba(247, 246, 242, 0.92);
+}
+
+@media (max-width: 1023px) {
+  .ft-admin {
+    background-attachment: scroll;
+    background-position: center, 57% center;
+  }
+}
+
+.ft-admin button,
+.ft-admin a,
+.ft-admin input,
+.ft-admin select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ft-admin-login {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  background-color: #17231d;
+  background-image:
+    linear-gradient(
+      105deg,
+      rgba(8, 15, 12, 0.76) 0%,
+      rgba(8, 15, 12, 0.58) 42%,
+      rgba(8, 15, 12, 0.5) 68%,
+      rgba(8, 15, 12, 0.64) 100%
+    ),
+    var(--admin-login-image);
+  background-position: center, center 54%;
+  background-size: cover;
+}
+
+.ft-admin-login-card {
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  border-radius: 1.5rem;
+  background: rgba(255, 255, 255, 0.96);
+  padding: 2rem;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px);
+}
+
+@media (min-width: 1024px) {
+  .ft-admin-login-card {
+    padding: 2.5rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .ft-admin-login {
+    background-image:
+      linear-gradient(
+        180deg,
+        rgba(8, 15, 12, 0.38) 0%,
+        rgba(8, 15, 12, 0.7) 100%
+      ),
+      var(--admin-login-image);
+    background-position: center, 57% center;
+  }
+
+  .ft-admin-login-card {
+    padding: 1.5rem;
+  }
+}
+
+.ft-admin-login input {
+  color: #171717;
+}
+
+.ft-admin-login input::placeholder {
+  color: #737373;
+}
+
+.ft-admin-login {
+  color-scheme: light;
+}
+
+.ft-admin-login button[type="submit"] {
+  min-height: 3.25rem;
+  box-shadow: 0 8px 22px rgba(180, 83, 9, 0.2);
+}
+
+.ft-admin-login a:focus-visible,
+.ft-admin-login button:focus-visible,
+.ft-admin-login input:focus-visible {
+  outline-color: #d97706;
+}
+
+.ft-admin input:focus-visible,
+.ft-admin select:focus-visible,
+.ft-admin button:focus-visible,
+.ft-admin a:focus-visible {
+  outline: 3px solid rgba(217, 119, 6, 0.62);
+  outline-offset: 3px;
+}
+
+.ft-admin button:not([aria-label^="Decrease "]):not([aria-label^="Increase "]):hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.ft-admin button[class*="bg-"]:hover:not(:disabled) {
+  box-shadow: 0 9px 22px rgba(23, 23, 23, 0.14);
+}
+
+.ft-admin button:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+}
+
+.ft-admin button:disabled {
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ft-admin *,
+  .ft-admin-login * {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

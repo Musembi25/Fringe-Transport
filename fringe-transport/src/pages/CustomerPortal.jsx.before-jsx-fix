@@ -1,0 +1,1078 @@
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
+import {
+  ArrowRight,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  LogOut,
+  LockKeyhole,
+  Mail,
+  UserRound,
+  MapPin,
+  RefreshCw,
+  ShieldCheck,
+  Ticket,
+  Wallet,
+  X,
+} from "lucide-react";
+import { supabase } from "../lib/supabase";
+
+function formatStatus(value) {
+  const status = String(value || "pending").toLowerCase();
+
+  return status
+    .replaceAll("_", " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDate(value) {
+  if (!value) return "Not specified";
+
+  const date = new Date(`${value}T00:00:00`);
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat("en-KE", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatTime(value) {
+  if (!value) return "Not specified";
+
+  const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+
+  if (!match) return value;
+
+  const date = new Date();
+  date.setHours(Number(match[1]), Number(match[2]), 0, 0);
+
+  return new Intl.DateTimeFormat("en-KE", {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function formatMoney(value) {
+  if (value === null || value === undefined || value === "") {
+    return "Not yet quoted";
+  }
+
+  return new Intl.NumberFormat("en-KE", {
+    style: "currency",
+    currency: "KES",
+    maximumFractionDigits: 2,
+  }).format(Number(value));
+}
+
+function StatusBadge({ status }) {
+  const value = String(status || "pending").toLowerCase();
+
+  const styles = {
+    pending: "border-amber-200 bg-amber-50 text-amber-800",
+    confirmed: "border-emerald-200 bg-emerald-50 text-emerald-800",
+    completed: "border-neutral-200 bg-neutral-100 text-neutral-700",
+    cancelled: "border-red-200 bg-red-50 text-red-700",
+  };
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold ${
+        styles[value] || styles.pending
+      }`}
+    >
+      {formatStatus(value)}
+    </span>
+  );
+}
+
+function Detail({ icon: Icon, label, value }) {
+  return (
+    <div className="flex items-start gap-3">
+      <div className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-orange-50 text-[#B45309]">
+        <Icon size={17} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-xs text-neutral-500">{label}</p>
+        <p className="mt-1 break-words text-sm font-semibold text-neutral-800">
+          {value || "Not specified"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function CustomerPortal() {
+  const [session, setSession] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [email, setEmail] = useState("");
+  const [sendingLink, setSendingLink] = useState(false);
+  const [linkSent, setLinkSent] = useState(false);
+  const [authMode, setAuthMode] = useState("login");
+  const [fullName, setFullName] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [authBusy, setAuthBusy] = useState(false);
+  const [resetSending, setResetSending] = useState(false);
+  const [recoveryMode, setRecoveryMode] = useState(
+    () => new URLSearchParams(window.location.search).get("mode") === "reset"
+  );
+  const [pageError, setPageError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [bookings, setBookings] = useState([]);
+  const [bookingsLoading, setBookingsLoading] = useState(false);
+  const [reference, setReference] = useState("");
+  const [appliedReference, setAppliedReference] = useState("");
+  const [activeRequest, setActiveRequest] = useState(null);
+  const [requestMessage, setRequestMessage] = useState("");
+  const [requestSending, setRequestSending] = useState(false);
+
+  useEffect(() => {
+    let mounted = true;
+
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
+
+      if (error) setPageError(error.message);
+      setSession(data?.session || null);
+      setAuthLoading(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
+      if (!mounted) return;
+
+      if (event === "PASSWORD_RECOVERY") setRecoveryMode(true);
+      setSession(nextSession);
+      setAuthLoading(false);
+      setPageError("");
+      setNotice("");
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    if (!session) {
+      setBookings([]);
+      setBookingsLoading(false);
+      return () => {
+        active = false;
+      };
+    }
+
+    async function loadBookings() {
+      setBookingsLoading(true);
+      setPageError("");
+
+      const { data, error } = await supabase.rpc(
+        "get_my_fringe_bookings",
+        {
+          p_reference: appliedReference || null,
+        }
+      );
+
+      if (!active) return;
+
+      if (error) {
+        setPageError(
+          error.message || "We could not load your bookings."
+        );
+        setBookings([]);
+      } else {
+        setBookings(Array.isArray(data) ? data : []);
+      }
+
+      setBookingsLoading(false);
+    }
+
+    loadBookings();
+
+    return () => {
+      active = false;
+    };
+  }, [session, appliedReference]);
+
+  async function sendSignInLink(event) {
+    event.preventDefault();
+
+    if (!email.trim()) {
+      setPageError("Enter the email address used for your booking.");
+      return;
+    }
+
+    setSendingLink(true);
+    setPageError("");
+    setNotice("");
+    setLinkSent(false);
+
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim().toLowerCase(),
+        options: {
+          emailRedirectTo: `${window.location.origin}/my-bookings`,
+        },
+      });
+
+      if (error) throw error;
+
+      setLinkSent(true);
+    } catch (error) {
+      setPageError(
+        error.message || "We could not send your sign-in link."
+      );
+    } finally {
+      setSendingLink(false);
+    }
+  }
+
+  async function handleAuthSubmit(event) {
+    event.preventDefault();
+    setPageError("");
+    setNotice("");
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
+      setPageError("Enter your email address.");
+      return;
+    }
+
+    if (authMode === "signup") {
+      if (fullName.trim().length < 2) {
+        setPageError("Enter your full name.");
+        return;
+      }
+      if (password.length < 8) {
+        setPageError("Your password must contain at least 8 characters.");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setPageError("Your passwords do not match.");
+        return;
+      }
+    } else if (password.length === 0) {
+      setPageError("Enter your password.");
+      return;
+    }
+
+    setAuthBusy(true);
+
+    try {
+      if (authMode === "signup") {
+        const { data, error } = await supabase.auth.signUp({
+          email: normalizedEmail,
+          password,
+          options: {
+            data: { full_name: fullName.trim() },
+            emailRedirectTo: `${window.location.origin}/my-bookings`,
+          },
+        });
+
+        if (error) throw error;
+
+        setPassword("");
+        setConfirmPassword("");
+        setAuthMode("login");
+
+        if (data.session) {
+          setNotice("Your account has been created and you are signed in.");
+        } else {
+          setNotice(
+            "Account created. Check your email and click the verification link before signing in."
+          );
+        }
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: normalizedEmail,
+          password,
+        });
+
+        if (error) throw error;
+        setPassword("");
+      }
+    } catch (error) {
+      setPageError(error.message || "Authentication failed. Please try again.");
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function sendPasswordReset(event) {
+    event.preventDefault();
+    setPageError("");
+    setNotice("");
+
+    if (!email.trim()) {
+      setPageError("Enter the email address for your account.");
+      return;
+    }
+
+    setResetSending(true);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        email.trim().toLowerCase(),
+        {
+          redirectTo: `${window.location.origin}/my-bookings?mode=reset`,
+        }
+      );
+
+      if (error) throw error;
+
+      setNotice(
+        "If an account exists for that address, a password-reset email will be sent. Open its link to choose a new password."
+      );
+    } catch (error) {
+      setPageError(error.message || "We could not send the reset email.");
+    } finally {
+      setResetSending(false);
+    }
+  }
+
+  async function updateRecoveredPassword(event) {
+    event.preventDefault();
+    setPageError("");
+    setNotice("");
+
+    if (password.length < 8) {
+      setPageError("Your new password must contain at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setPageError("Your passwords do not match.");
+      return;
+    }
+
+    setAuthBusy(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+
+      setPassword("");
+      setConfirmPassword("");
+      setRecoveryMode(false);
+      window.history.replaceState({}, "", "/my-bookings");
+      setNotice("Your password has been updated successfully.");
+    } catch (error) {
+      setPageError(
+        error.message || "We could not update your password. Request a fresh reset link."
+      );
+    } finally {
+      setAuthBusy(false);
+    }
+  }
+
+  async function signOut() {
+    setPageError("");
+    setNotice("");
+
+    const { error } = await supabase.auth.signOut();
+
+    if (error) {
+      setPageError(error.message);
+      return;
+    }
+
+    setSession(null);
+    setBookings([]);
+    setAppliedReference("");
+    setReference("");
+    setActiveRequest(null);
+  }
+
+  async function submitRequest(event) {
+    event.preventDefault();
+
+    if (!activeRequest) return;
+
+    setRequestSending(true);
+    setPageError("");
+    setNotice("");
+
+    try {
+      const { error } = await supabase.rpc(
+        "submit_fringe_booking_request",
+        {
+          p_booking_id: activeRequest.bookingId,
+          p_request_type: activeRequest.type,
+          p_message: requestMessage.trim() || null,
+        }
+      );
+
+      if (error) throw error;
+
+      setNotice(
+        activeRequest.type === "cancellation"
+          ? "Your cancellation request has been submitted for review. Your booking has not been cancelled automatically."
+          : "Your change request has been submitted for review."
+      );
+
+      setActiveRequest(null);
+      setRequestMessage("");
+    } catch (error) {
+      setPageError(
+        error.message || "We could not submit your request."
+      );
+    } finally {
+      setRequestSending(false);
+    }
+  }
+
+  return (
+    <main className="min-h-[70vh] bg-[#f7f6f2] pb-20">
+      <section className="bg-[#111111] text-white">
+        <div className="mx-auto max-w-[1280px] px-5 py-14 sm:px-6 sm:py-16 lg:px-8">
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-amber-500">
+            Customer portal
+          </p>
+
+          <div className="mt-4 flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+            <div>
+              <h1 className="text-3xl font-semibold tracking-tight sm:text-5xl">
+                Your journey, <span className="text-amber-500">in view.</span>
+              </h1>
+              <p className="mt-4 max-w-2xl text-sm leading-7 text-neutral-400 sm:text-base">
+                Access your booking details, follow trip updates, and
+                contact our team about a journey.
+              </p>
+            </div>
+
+            {session && (
+              <button
+                type="button"
+                onClick={signOut}
+                className="inline-flex w-fit items-center gap-2 rounded-lg border border-white/20 px-4 py-2.5 text-sm font-semibold transition hover:border-amber-500 hover:text-amber-400"
+              >
+                <LogOut size={16} />
+                Sign out
+              </button>
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="mx-auto max-w-[1280px] px-5 py-10 sm:px-6 sm:py-14 lg:px-8">
+        {pageError && (
+          <div
+            role="alert"
+            className="mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+          >
+            <X size={18} className="mt-0.5 shrink-0" />
+            <span>{pageError}</span>
+          </div>
+        )}
+
+        {notice && (
+          <div
+            role="status"
+            className="mb-6 flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800"
+          >
+            <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
+            <span>{notice}</span>
+          </div>
+        )}
+
+        {authLoading ? (
+          <div className="rounded-2xl border border-neutral-200 bg-white p-10 text-center">
+            <RefreshCw size={24} className="mx-auto animate-spin text-[#B45309]" />
+            <p className="mt-4 text-sm text-neutral-500">
+              Checking your sign-in…
+            </p>
+          </div>
+        ) : recoveryMode ? (
+          <div className="mx-auto max-w-lg rounded-2xl border border-neutral-200 bg-white p-7 shadow-sm sm:p-10">
+            <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-100 text-[#B45309]">
+              <LockKeyhole size={24} />
+            </div>
+            <h2 className="mt-6 text-2xl font-semibold text-neutral-900">Choose a new password</h2>
+            <p className="mt-2 text-sm leading-6 text-neutral-500">
+              Enter your new password below to finish resetting your account.
+            </p>
+            <form onSubmit={updateRecoveredPassword} className="mt-7 space-y-4">
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-neutral-700">New password</span>
+                <input type="password" required minLength={8} autoComplete="new-password"
+                  value={password} onChange={(event) => setPassword(event.target.value)}
+                  placeholder="At least 8 characters"
+                  className="w-full rounded-xl border border-neutral-200 px-4 py-3.5 text-sm outline-none focus:border-amber-600" />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-neutral-700">Confirm new password</span>
+                <input type="password" required minLength={8} autoComplete="new-password"
+                  value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)}
+                  placeholder="Re-enter your new password"
+                  className="w-full rounded-xl border border-neutral-200 px-4 py-3.5 text-sm outline-none focus:border-amber-600" />
+              </label>
+              <button type="submit" disabled={authBusy}
+                className="w-full rounded-xl bg-[#111111] px-5 py-3.5 text-sm font-semibold text-white hover:bg-[#B45309] disabled:opacity-60">
+                {authBusy ? "Updating password…" : "Update password"}
+              </button>
+            </form>
+          </div>
+        ) : !session ? (
+          <div className="mx-auto grid max-w-4xl overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm md:grid-cols-[0.9fr_1.1fr]">
+            <div className="bg-[#171717] p-7 text-white sm:p-10">
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-500 text-[#111111]">
+                <ShieldCheck size={24} />
+              </div>
+
+              <h2 className="mt-7 text-2xl font-semibold">
+                Your bookings stay private.
+              </h2>
+
+              <p className="mt-3 text-sm leading-7 text-neutral-400">
+                Verify the email address you used when booking to access
+                your journeys. A booking reference alone cannot unlock
+                your private trip details.
+              </p>
+
+              <div className="mt-8 flex items-center gap-3 border-t border-white/10 pt-5 text-xs text-neutral-400">
+                <ShieldCheck size={16} className="text-amber-500" />
+                Secure email verification
+              </div>
+            </div>
+
+            <div className="p-7 sm:p-10">
+              {authMode === "signup" ? (
+                <>
+                  <h2 className="text-xl font-semibold text-neutral-900">
+                    Create your account
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-neutral-500">
+                    Register to securely access journeys linked to your email.
+                  </p>
+                  <form onSubmit={handleAuthSubmit} className="mt-7 space-y-4">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-neutral-700">Full name</span>
+                      <span className="flex items-center gap-3 rounded-xl border border-neutral-200 px-4 focus-within:border-amber-600">
+                        <UserRound size={18} className="shrink-0 text-neutral-400" />
+                        <input required autoComplete="name" minLength={2} value={fullName}
+                          onChange={(event) => setFullName(event.target.value)}
+                          placeholder="Your full name"
+                          className="min-w-0 flex-1 bg-transparent py-3.5 text-sm outline-none" />
+                      </span>
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-neutral-700">Email address</span>
+                      <span className="flex items-center gap-3 rounded-xl border border-neutral-200 px-4 focus-within:border-amber-600">
+                        <Mail size={18} className="shrink-0 text-neutral-400" />
+                        <input type="email" required autoComplete="email" value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                          placeholder="you@example.com"
+                          className="min-w-0 flex-1 bg-transparent py-3.5 text-sm outline-none" />
+                      </span>
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-neutral-700">Password</span>
+                      <span className="flex items-center gap-3 rounded-xl border border-neutral-200 px-4 focus-within:border-amber-600">
+                        <LockKeyhole size={18} className="shrink-0 text-neutral-400" />
+                        <input type="password" required minLength={8} autoComplete="new-password"
+                          value={password} onChange={(event) => setPassword(event.target.value)}
+                          placeholder="At least 8 characters"
+                          className="min-w-0 flex-1 bg-transparent py-3.5 text-sm outline-none" />
+                      </span>
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-neutral-700">Confirm password</span>
+                      <input type="password" required minLength={8} autoComplete="new-password"
+                        value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)}
+                        placeholder="Re-enter your password"
+                        className="w-full rounded-xl border border-neutral-200 px-4 py-3.5 text-sm outline-none focus:border-amber-600" />
+                    </label>
+                    <button type="submit" disabled={authBusy}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#111111] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#B45309] disabled:cursor-not-allowed disabled:opacity-60">
+                      {authBusy ? "Creating account…" : "Create account"} <ArrowRight size={17} />
+                    </button>
+                  </form>
+                  <p className="mt-5 text-center text-sm text-neutral-500">
+                    Already registered?{" "}
+                    <button type="button" onClick={() => { setAuthMode("login"); setPageError(""); setNotice(""); }}
+                      className="font-semibold text-[#B45309] hover:underline">Log in</button>
+                  </p>
+                </>
+              ) : authMode === "forgot" ? (
+                <>
+                  <h2 className="text-xl font-semibold text-neutral-900">Reset your password</h2>
+                  <p className="mt-2 text-sm leading-6 text-neutral-500">
+                    We'll send a secure link to help you choose a new password.
+                  </p>
+                  <form onSubmit={sendPasswordReset} className="mt-7 space-y-4">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-neutral-700">Email address</span>
+                      <input type="email" required autoComplete="email" value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full rounded-xl border border-neutral-200 px-4 py-3.5 text-sm outline-none focus:border-amber-600" />
+                    </label>
+                    <button type="submit" disabled={resetSending}
+                      className="w-full rounded-xl bg-[#111111] px-5 py-3.5 text-sm font-semibold text-white hover:bg-[#B45309] disabled:opacity-60">
+                      {resetSending ? "Sending reset email…" : "Send password reset link"}
+                    </button>
+                  </form>
+                  <button type="button" onClick={() => { setAuthMode("login"); setPageError(""); setNotice(""); }}
+                    className="mt-5 text-sm font-semibold text-[#B45309] hover:underline">Back to log in</button>
+                </>
+              ) : authMode === "magic" ? (
+                <>
+                  <h2 className="text-xl font-semibold text-neutral-900">Sign in with an email link</h2>
+                  <p className="mt-2 text-sm leading-6 text-neutral-500">
+                    We'll email you a secure sign-in link. No password needed.
+                  </p>
+                  <form onSubmit={sendSignInLink} className="mt-7 space-y-4">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-neutral-700">Email address</span>
+                      <input type="email" required autoComplete="email" value={email}
+                        onChange={(event) => setEmail(event.target.value)}
+                        placeholder="you@example.com"
+                        className="w-full rounded-xl border border-neutral-200 px-4 py-3.5 text-sm outline-none focus:border-amber-600" />
+                    </label>
+                    <button type="submit" disabled={sendingLink}
+                      className="w-full rounded-xl bg-[#111111] px-5 py-3.5 text-sm font-semibold text-white hover:bg-[#B45309] disabled:opacity-60">
+                      {sendingLink ? "Sending link…" : "Email me a sign-in link"}
+                    </button>
+                  </form>
+                  {linkSent && (
+                    <p role="status" className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-800">
+                      Check your inbox and open the sign-in link on this device.
+                    </p>
+                  )}
+                  <button type="button" onClick={() => { setAuthMode("login"); setPageError(""); setNotice(""); }}
+                    className="mt-5 text-sm font-semibold text-[#B45309] hover:underline">Back to log in</button>
+                </>
+              ) : (
+                <>
+                  <h2 className="text-xl font-semibold text-neutral-900">Log in to your account</h2>
+                  <p className="mt-2 text-sm leading-6 text-neutral-500">
+                    Sign in to view and manage journeys associated with your verified email.
+                  </p>
+                  <form onSubmit={handleAuthSubmit} className="mt-7 space-y-4">
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-neutral-700">Email address</span>
+                      <span className="flex items-center gap-3 rounded-xl border border-neutral-200 px-4 focus-within:border-amber-600">
+                        <Mail size={18} className="shrink-0 text-neutral-400" />
+                        <input type="email" required autoComplete="email" value={email}
+                          onChange={(event) => setEmail(event.target.value)}
+                          placeholder="you@example.com"
+                          className="min-w-0 flex-1 bg-transparent py-3.5 text-sm outline-none" />
+                      </span>
+                    </label>
+                    <label className="block">
+                      <span className="mb-2 block text-sm font-semibold text-neutral-700">Password</span>
+                      <span className="flex items-center gap-3 rounded-xl border border-neutral-200 px-4 focus-within:border-amber-600">
+                        <LockKeyhole size={18} className="shrink-0 text-neutral-400" />
+                        <input type="password" required autoComplete="current-password" value={password}
+                          onChange={(event) => setPassword(event.target.value)}
+                          placeholder="Enter your password"
+                          className="min-w-0 flex-1 bg-transparent py-3.5 text-sm outline-none" />
+                      </span>
+                    </label>
+                    <div className="text-right">
+                      <button type="button" onClick={() => { setAuthMode("forgot"); setPageError(""); setNotice(""); }}
+                        className="text-sm font-semibold text-[#B45309] hover:underline">Forgot password?</button>
+                    </div>
+                    <button type="submit" disabled={authBusy}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#111111] px-5 py-3.5 text-sm font-semibold text-white transition hover:bg-[#B45309] disabled:cursor-not-allowed disabled:opacity-60">
+                      {authBusy ? "Signing in…" : "Log in"} <ArrowRight size={17} />
+                    </button>
+                  </form>
+                  <div className="mt-5 border-t border-neutral-100 pt-5 text-center">
+                    <p className="text-sm text-neutral-500">New to Fringe Transport?</p>
+                    <button type="button" onClick={() => { setAuthMode("signup"); setPageError(""); setNotice(""); }}
+                      className="mt-2 text-sm font-semibold text-[#B45309] hover:underline">Create an account</button>
+                    <p className="mt-4">
+                      <button type="button" onClick={() => { setAuthMode("magic"); setPageError(""); setNotice(""); setLinkSent(false); }}
+                        className="text-xs font-medium text-neutral-500 hover:text-[#B45309]">Or sign in with an email link</button>
+                    </p>
+                  </div>
+                </>
+              )}
+
+              <p className="mt-6 text-center text-xs leading-5 text-neutral-500">
+                Need to make a new booking?{" "}
+                <Link to="/booking" className="font-semibold text-[#B45309] hover:underline">
+                  Book a ride
+                </Link>
+              </p>
+            </div>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#B45309]">
+                  Signed in securely
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold text-neutral-900">
+                  My bookings
+                </h2>
+                <p className="mt-2 break-all text-sm text-neutral-500">
+                  {session.user.email}
+                </p>
+              </div>
+
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  setAppliedReference(reference.trim());
+                }}
+                className="flex w-full max-w-md gap-2"
+              >
+                <input
+                  value={reference}
+                  onChange={(event) => setReference(event.target.value)}
+                  placeholder="Filter by booking reference"
+                  aria-label="Booking reference"
+                  className="min-w-0 flex-1 rounded-xl border border-neutral-200 bg-white px-4 py-3 text-sm outline-none focus:border-amber-600"
+                />
+                <button
+                  type="submit"
+                  className="rounded-xl bg-[#111111] px-4 py-3 text-sm font-semibold text-white hover:bg-[#B45309]"
+                >
+                  Find
+                </button>
+                {appliedReference && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReference("");
+                      setAppliedReference("");
+                    }}
+                    aria-label="Clear booking filter"
+                    className="rounded-xl border border-neutral-200 bg-white px-3 text-neutral-600 hover:text-[#B45309]"
+                  >
+                    <X size={17} />
+                  </button>
+                )}
+              </form>
+            </div>
+
+            {bookingsLoading ? (
+              <div className="rounded-2xl border border-neutral-200 bg-white p-10 text-center">
+                <RefreshCw size={24} className="mx-auto animate-spin text-[#B45309]" />
+                <p className="mt-4 text-sm text-neutral-500">
+                  Loading your bookings…
+                </p>
+              </div>
+            ) : bookings.length === 0 ? (
+              <div className="rounded-2xl border border-neutral-200 bg-white px-6 py-14 text-center">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-50 text-[#B45309]">
+                  <Ticket size={25} />
+                </div>
+                <h3 className="mt-5 text-lg font-semibold text-neutral-900">
+                  {appliedReference
+                    ? "No matching booking found"
+                    : "No bookings found for this email"}
+                </h3>
+                <p className="mx-auto mt-2 max-w-lg text-sm leading-7 text-neutral-500">
+                  {appliedReference
+                    ? "Check the reference and try again. Only bookings linked to your verified email can be displayed."
+                    : "Use the same email address you entered on your booking request. If you booked with another email, sign out and verify that address instead."}
+                </p>
+                <Link
+                  to="/booking"
+                  className="mt-6 inline-flex items-center gap-2 rounded-xl bg-[#111111] px-5 py-3 text-sm font-semibold text-white hover:bg-[#B45309]"
+                >
+                  Book a ride <ArrowRight size={16} />
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {bookings.map((booking) => (
+                  <article
+                    key={booking.id}
+                    className="overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm"
+                  >
+                    <div className="flex flex-col justify-between gap-4 border-b border-neutral-100 p-5 sm:flex-row sm:items-center sm:px-7 sm:py-6">
+                      <div>
+                        <p className="text-xs font-semibold uppercase tracking-[0.15em] text-neutral-400">
+                          Booking reference
+                        </p>
+                        <p className="mt-1 text-lg font-bold tracking-wide text-[#B45309]">
+                          {booking.reference || "Reference unavailable"}
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <StatusBadge status={booking.status} />
+                        <span className="text-xs text-neutral-500">
+                          Requested {formatDate(String(booking.created_at || "").slice(0, 10))}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="grid gap-7 p-5 sm:p-7 lg:grid-cols-[1fr_0.7fr]">
+                      <div>
+                        <p className="mb-5 text-xs font-bold uppercase tracking-[0.16em] text-neutral-400">
+                          Journey details
+                        </p>
+
+                        <div className="grid gap-5 sm:grid-cols-2">
+                          <Detail
+                            icon={MapPin}
+                            label="Pickup location"
+                            value={booking.pickup_location}
+                          />
+                          <Detail
+                            icon={MapPin}
+                            label="Destination"
+                            value={booking.destination}
+                          />
+                          <Detail
+                            icon={CalendarDays}
+                            label="Travel date"
+                            value={formatDate(booking.travel_date)}
+                          />
+                          <Detail
+                            icon={Clock3}
+                            label="Departure time"
+                            value={formatTime(booking.travel_time)}
+                          />
+                          <Detail
+                            icon={Ticket}
+                            label="Service"
+                            value={booking.service_name}
+                          />
+                          <Detail
+                            icon={Wallet}
+                            label="Passengers"
+                            value={String(booking.passengers ?? "Not specified")}
+                          />
+                        </div>
+
+                        {booking.status_history?.length > 0 && (
+                          <div className="mt-8 border-t border-neutral-100 pt-6">
+                            <h3 className="text-sm font-semibold text-neutral-800">
+                              Booking status history
+                            </h3>
+                            <ol className="mt-4 space-y-4">
+                              {booking.status_history.map((item, index) => (
+                                <li
+                                  key={`${item.created_at}-${index}`}
+                                  className="flex gap-3"
+                                >
+                                  <span className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-orange-50 text-[#B45309]">
+                                    <CheckCircle2 size={13} />
+                                  </span>
+                                  <div>
+                                    <p className="text-sm font-medium text-neutral-800">
+                                      {item.old_status
+                                        ? `${formatStatus(item.old_status)} → `
+                                        : ""}
+                                      {formatStatus(item.new_status)}
+                                    </p>
+                                    <p className="mt-1 text-xs text-neutral-500">
+                                      {new Date(item.created_at).toLocaleString("en-KE", {
+                                        dateStyle: "medium",
+                                        timeStyle: "short",
+                                      })}
+                                    </p>
+                                  </div>
+                                </li>
+                              ))}
+                            </ol>
+                          </div>
+                        )}
+                      </div>
+
+                      <aside className="rounded-xl bg-[#f8f7f4] p-5 sm:p-6">
+                        <p className="text-xs font-bold uppercase tracking-[0.16em] text-neutral-400">
+                          Fare and payment
+                        </p>
+
+                        <div className="mt-5 flex items-start justify-between gap-4">
+                          <span className="text-sm text-neutral-500">
+                            Quoted fare
+                          </span>
+                          <span className="text-right text-sm font-semibold text-neutral-900">
+                            {formatMoney(booking.quoted_price)}
+                          </span>
+                        </div>
+
+                        <div className="mt-4 flex items-start justify-between gap-4 border-t border-neutral-200 pt-4">
+                          <span className="text-sm text-neutral-500">
+                            Amount paid
+                          </span>
+                          <span className="text-right text-sm font-semibold text-neutral-900">
+                            {formatMoney(booking.amount_paid ?? 0)}
+                          </span>
+                        </div>
+
+                        <div className="mt-4 flex items-start justify-between gap-4">
+                          <span className="text-sm text-neutral-500">
+                            Payment status
+                          </span>
+                          <span className="text-right text-sm font-semibold text-neutral-900">
+                            {formatStatus(booking.payment_status || "unpaid")}
+                          </span>
+                        </div>
+
+                        <div className="mt-6 grid gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setPageError("");
+                              setActiveRequest({
+                                bookingId: booking.id,
+                                type: "change",
+                                reference: booking.reference,
+                              });
+                              setRequestMessage("");
+                            }}
+                            className="w-full rounded-xl border border-neutral-300 bg-white px-4 py-3 text-sm font-semibold text-neutral-800 transition hover:border-amber-600 hover:text-[#B45309]"
+                          >
+                            Request a change
+                          </button>
+
+                          {booking.status !== "cancelled" &&
+                            booking.status !== "completed" && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPageError("");
+                                  setActiveRequest({
+                                    bookingId: booking.id,
+                                    type: "cancellation",
+                                    reference: booking.reference,
+                                  });
+                                  setRequestMessage("");
+                                }}
+                                className="w-full rounded-xl border border-red-200 bg-white px-4 py-3 text-sm font-semibold text-red-700 transition hover:bg-red-50"
+                              >
+                                Request cancellation
+                              </button>
+                            )}
+                        </div>
+
+                        <p className="mt-4 text-xs leading-5 text-neutral-500">
+                          Requests are reviewed by Fringe Transport. A
+                          cancellation request does not cancel the booking
+                          automatically.
+                        </p>
+                      </aside>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-8 flex flex-col justify-between gap-3 rounded-xl border border-neutral-200 bg-white p-5 sm:flex-row sm:items-center">
+              <div>
+                <p className="text-sm font-semibold text-neutral-900">
+                  Need help with your journey?
+                </p>
+                <p className="mt-1 text-sm text-neutral-500">
+                  Contact our team for assistance.
+                </p>
+              </div>
+              <a
+                href="https://wa.me/254742934895"
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#111111] px-5 py-3 text-sm font-semibold text-white hover:bg-[#B45309]"
+              >
+                Contact Fringe Transport <ArrowRight size={16} />
+              </a>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {activeRequest && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/55 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget && !requestSending) {
+              setActiveRequest(null);
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="request-title"
+            className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl sm:p-8"
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.18em] text-[#B45309]">
+                  Booking {activeRequest.reference}
+                </p>
+                <h2 id="request-title" className="mt-2 text-xl font-semibold">
+                  {activeRequest.type === "cancellation"
+                    ? "Request cancellation"
+                    : "Request a booking change"}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setActiveRequest(null)}
+                disabled={requestSending}
+                aria-label="Close request form"
+                className="rounded-lg p-2 text-neutral-500 hover:bg-neutral-100"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <p className="mt-3 text-sm leading-6 text-neutral-500">
+              Tell our team what you need. Your request will be sent for
+              review; your booking will not change automatically.
+            </p>
+
+            <form onSubmit={submitRequest} className="mt-6">
+              <label className="block">
+                <span className="mb-2 block text-sm font-semibold text-neutral-700">
+                  Message <span className="font-normal text-neutral-400">(optional)</span>
+                </span>
+                <textarea
+                  rows={5}
+                  maxLength={1000}
+                  value={requestMessage}
+                  onChange={(event) => setRequestMessage(event.target.value)}
+                  placeholder={
+                    activeRequest.type === "cancellation"
+                      ? "Tell us why you need to cancel…"
+                      : "Describe the change you would like to request…"
+                  }
+                  className="w-full resize-y rounded-xl border border-neutral-200 px-4 py-3 text-sm outline-none focus:border-amber-600"
+                />
+              </label>
+
+              <div className="mt-5 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <button
+                  type="button"
+                  disabled={requestSending}
+                  onClick={() => setActiveRequest(null)}
+                  className="rounded-xl border border-neutral-200 px-5 py-3 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"
+                >
+                  Go back
+                </button>
+                <button
+                  type="submit"
+                  disabled={requestSending}
+                  className="rounded-xl bg-[#111111] px-5 py-3 text-sm font-semibold text-white hover:bg-[#B45309] disabled:opacity-60"
+                >
+                  {requestSending ? "Submitting…" : "Submit request"}
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
+    </main>
+  );
+}
