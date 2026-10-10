@@ -420,16 +420,6 @@ export default function AdminDashboard() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
-  const [paymentFilter, setPaymentFilter] = useState("all");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
-  const [page, setPage] = useState(0);
-  const [totalFiltered, setTotalFiltered] = useState(0);
-  const [bookingsLoading, setBookingsLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [bookingsReloadKey, setBookingsReloadKey] = useState(0);
-  const pageSize = 50;
   const [updatingId, setUpdatingId] = useState("");
   const [deletingId, setDeletingId] = useState("");
   const [bookingToDelete, setBookingToDelete] = useState(null);
@@ -452,12 +442,8 @@ export default function AdminDashboard() {
 
   const loadData = useCallback(async (refresh = false) => {
     setError("");
-    if (refresh) {
-      setRefreshing(true);
-      setBookingsReloadKey((key) => key + 1);
-    } else {
-      setLoading(true);
-    }
+    if (refresh) setRefreshing(true);
+    else setLoading(true);
 
     try {
       const today = new Date();
@@ -474,8 +460,13 @@ export default function AdminDashboard() {
         String(tomorrow.getDate()).padStart(2, "0"),
       ].join("-");
 
-      const [totalResult, todayResult, ...statusResults] =
+      const [listResult, totalResult, todayResult, ...statusResults] =
         await Promise.all([
+          supabase
+            .from("bookings")
+            .select("*")
+            .order("created_at", { ascending: false })
+            .limit(200),
           supabase.from("bookings").select("id", { count: "exact", head: true }),
           supabase
             .from("bookings")
@@ -490,12 +481,14 @@ export default function AdminDashboard() {
           ),
         ]);
 
+      if (listResult.error) throw listResult.error;
       if (totalResult.error) throw totalResult.error;
       if (todayResult.error) throw todayResult.error;
       for (const result of statusResults) {
         if (result.error) throw result.error;
       }
 
+      setBookings(listResult.data || []);
       setCounts({
         total: totalResult.count || 0,
         today: todayResult.count || 0,
@@ -521,7 +514,7 @@ export default function AdminDashboard() {
     } catch (err) {
       setError(
         err.message ||
-          "Could not load dashboard data. Check your Supabase connection and administrator policies."
+          "Could not load bookings. Check your Supabase connection and administrator policies."
       );
     } finally {
       setLoading(false);
@@ -533,95 +526,27 @@ export default function AdminDashboard() {
     loadData();
   }, [loadData]);
 
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 300);
-    return () => clearTimeout(timer);
-  }, [search]);
+  const visibleBookings = useMemo(() => {
+    const query = search.trim().toLowerCase();
 
-  useEffect(() => {
-    setPage(0);
-  }, [debouncedSearch, filter, paymentFilter, startDate, endDate]);
+    return bookings.filter((booking) => {
+      const status = String(booking.status || "pending").toLowerCase();
+      const matchesFilter = filter === "all" || status === filter;
+      const searchable = [
+        booking.reference,
+        booking.customer_name,
+        booking.customer_phone,
+        booking.customer_email,
+        booking.pickup_location,
+        booking.destination,
+        booking.service_name,
+      ]
+        .join(" ")
+        .toLowerCase();
 
-  const applyBookingFilters = useCallback((initialQuery) => {
-    let query = initialQuery;
-
-    if (filter !== "all") query = query.eq("status", filter);
-    if (paymentFilter !== "all") {
-      query = query.eq("payment_status", paymentFilter);
-    }
-    if (startDate) query = query.gte("travel_date", startDate);
-    if (endDate) query = query.lte("travel_date", endDate);
-
-    const safeSearch = debouncedSearch
-      .replace(/[(),%'"\\;]/g, " ")
-      .replace(/[^\\w\\s@.+-]/g, " ")
-      .replace(/\\s+/g, " ")
-      .trim();
-
-    if (safeSearch) {
-      const term = `%${safeSearch}%`;
-      query = query.or([
-        `reference.ilike.${term}`,
-        `customer_name.ilike.${term}`,
-        `customer_phone.ilike.${term}`,
-        `customer_email.ilike.${term}`,
-        `pickup_location.ilike.${term}`,
-        `destination.ilike.${term}`,
-        `service_name.ilike.${term}`,
-      ].join(","));
-    }
-
-    return query;
-  }, [filter, paymentFilter, startDate, endDate, debouncedSearch]);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    async function fetchBookings() {
-      if (startDate && endDate && startDate > endDate) {
-        setBookings([]);
-        setTotalFiltered(0);
-        setBookingsLoading(false);
-        setError("The start date must be on or before the end date.");
-        return;
-      }
-
-      setBookingsLoading(true);
-      setError("");
-
-      try {
-        const { data, error: queryError, count } = await applyBookingFilters(
-          supabase.from("bookings").select("*", { count: "exact" })
-        )
-          .order("created_at", { ascending: false })
-          .range(page * pageSize, page * pageSize + pageSize - 1);
-
-        if (queryError) throw queryError;
-        if (cancelled) return;
-
-        setBookings(data || []);
-        setTotalFiltered(count || 0);
-      } catch (err) {
-        if (!cancelled) {
-          setBookings([]);
-          setTotalFiltered(0);
-          setError(err.message || "Could not load matching bookings.");
-        }
-      } finally {
-        if (!cancelled) setBookingsLoading(false);
-      }
-    }
-
-    fetchBookings();
-    return () => {
-      cancelled = true;
-    };
-  }, [applyBookingFilters, page, bookingsReloadKey, startDate, endDate]);
-
-  const visibleBookings = bookings;
-  const totalPages = Math.ceil(totalFiltered / pageSize);
-  const firstRecord = totalFiltered === 0 ? 0 : page * pageSize + 1;
-  const lastRecord = Math.min((page + 1) * pageSize, totalFiltered);
+      return matchesFilter && (!query || searchable.includes(query));
+    });
+  }, [bookings, filter, search]);
 
   async function openBooking(booking) {
     setSelectedBooking(booking);
@@ -806,77 +731,41 @@ export default function AdminDashboard() {
     }
   }
 
-  async function exportCsv() {
-    if (startDate && endDate && startDate > endDate) {
-      setError("The start date must be on or before the end date.");
-      return;
-    }
+  function exportCsv() {
+    const columns = [
+      ["Reference", (b) => b.reference],
+      ["Customer", (b) => b.customer_name],
+      ["Phone", (b) => b.customer_phone],
+      ["Email", (b) => b.customer_email],
+      ["Pickup", (b) => b.pickup_location],
+      ["Destination", (b) => b.destination],
+      ["Travel date", (b) => b.travel_date],
+      ["Travel time", (b) => b.travel_time],
+      ["Service", (b) => b.service_name],
+      ["Status", (b) => b.status],
+      ["Quoted price (KES)", (b) => b.quoted_price],
+      ["Amount paid (KES)", (b) => b.amount_paid],
+      ["Payment status", (b) => b.payment_status],
+    ];
 
-    setExporting(true);
-    setError("");
+    const escape = (value) =>
+      `"${String(value ?? "").replaceAll('"', '""')}"`;
 
-    try {
-      const allRows = [];
-      const batchSize = 500;
-      let offset = 0;
+    const csv = [
+      columns.map(([label]) => escape(label)).join(","),
+      ...visibleBookings.map((booking) =>
+        columns.map(([, getValue]) => escape(getValue(booking))).join(",")
+      ),
+    ].join("\r\n");
 
-      while (true) {
-        const { data, error: exportError } = await applyBookingFilters(
-          supabase.from("bookings").select("*")
-        )
-          .order("created_at", { ascending: false })
-          .range(offset, offset + batchSize - 1);
-
-        if (exportError) throw exportError;
-        const batch = data || [];
-        allRows.push(...batch);
-
-        if (batch.length < batchSize) break;
-        offset += batchSize;
-      }
-
-      const columns = [
-        ["Reference", (b) => b.reference],
-        ["Customer", (b) => b.customer_name],
-        ["Phone", (b) => b.customer_phone],
-        ["Email", (b) => b.customer_email],
-        ["Pickup", (b) => b.pickup_location],
-        ["Destination", (b) => b.destination],
-        ["Travel date", (b) => b.travel_date],
-        ["Travel time", (b) => b.travel_time],
-        ["Service", (b) => b.service_name],
-        ["Status", (b) => b.status],
-        ["Quoted price (KES)", (b) => b.quoted_price],
-        ["Amount paid (KES)", (b) => b.amount_paid],
-        ["Payment status", (b) => b.payment_status],
-      ];
-
-      const escape = (value) =>
-        `"${String(value ?? "").replaceAll('"', '""')}"`;
-
-      const csv = [
-        columns.map(([label]) => escape(label)).join(","),
-        ...allRows.map((booking) =>
-          columns.map(([, getValue]) => escape(getValue(booking))).join(",")
-        ),
-      ].join("\r\n");
-
-      const url = URL.createObjectURL(
-        new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" })
-      );
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = `fringe-bookings-${new Date().toISOString().slice(0, 10)}.csv`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      setActionMessage(`Exported ${allRows.length} matching booking(s).`);
-    } catch (err) {
-      setError(err.message || "Could not export matching bookings.");
-    } finally {
-      setExporting(false);
-    }
+    const url = URL.createObjectURL(
+      new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" })
+    );
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `fringe-bookings-${new Date().toISOString().slice(0, 10)}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   const metrics = [
@@ -939,11 +828,11 @@ export default function AdminDashboard() {
           <button
             type="button"
             onClick={exportCsv}
-            disabled={totalFiltered === 0 || exporting || bookingsLoading}
+            disabled={visibleBookings.length === 0}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#171717] px-4 py-3 text-sm font-semibold text-white transition hover:bg-[#333] disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Download size={15} />
-            {exporting ? "Exporting..." : "Export CSV"}
+            Export CSV
           </button>
         </div>
       </div>
@@ -1017,7 +906,7 @@ export default function AdminDashboard() {
           <div>
             <h2 className="text-base font-semibold">{bookingsPage ? "All bookings" : "Recent bookings"}</h2>
             <p className="mt-1 text-xs text-neutral-500">
-              {bookingsLoading ? "Loading matching bookings..." : `${totalFiltered} matching · ${counts.total} total`}
+              {loading ? "Loading records..." : `${visibleBookings.length} displayed · ${counts.total} total`}
             </p>
           </div>
           <div className="flex flex-col gap-2 sm:flex-row">
@@ -1035,47 +924,15 @@ export default function AdminDashboard() {
               <option value="all">All statuses</option>
               {statuses.map((status) => <option key={status} value={status}>{formatStatus(status)}</option>)}
             </select>
-            <select
-              value={paymentFilter}
-              onChange={(event) => setPaymentFilter(event.target.value)}
-              aria-label="Filter by payment status"
-              className="rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-[#D97706]"
-            >
-              <option value="all">All payments</option>
-              <option value="unpaid">Unpaid</option>
-              <option value="partial">Partially paid</option>
-              <option value="paid">Paid</option>
-              <option value="refunded">Refunded</option>
-            </select>
-            <label className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-500">
-              From
-              <input
-                type="date"
-                value={startDate}
-                onChange={(event) => setStartDate(event.target.value)}
-                aria-label="Travel date from"
-                className="min-w-0 bg-transparent text-sm text-neutral-800 outline-none"
-              />
-            </label>
-            <label className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-500">
-              To
-              <input
-                type="date"
-                value={endDate}
-                onChange={(event) => setEndDate(event.target.value)}
-                aria-label="Travel date to"
-                className="min-w-0 bg-transparent text-sm text-neutral-800 outline-none"
-              />
-            </label>
           </div>
         </div>
 
-        {bookingsLoading ? (
+        {loading ? (
           <div className="space-y-3 p-6">{[1, 2, 3, 4].map((item) => <div key={item} className="h-14 animate-pulse rounded-xl bg-neutral-50" />)}</div>
         ) : visibleBookings.length === 0 ? (
           <div className="px-5 py-16 text-center sm:px-8">
             <CalendarDays size={24} className="mx-auto text-neutral-400" />
-            <h3 className="mt-4 text-sm font-semibold">{totalFiltered === 0 && !search.trim() && filter === "all" && paymentFilter === "all" && !startDate && !endDate && counts.total === 0 ? "No bookings yet" : "No matching bookings"}</h3>
+            <h3 className="mt-4 text-sm font-semibold">{bookings.length === 0 ? "No bookings yet" : "No matching bookings"}</h3>
             <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-neutral-500">
               {bookings.length === 0 ? "Customer booking requests will appear here when submitted through your website." : "Try another search term or status filter."}
             </p>
@@ -1142,35 +999,7 @@ export default function AdminDashboard() {
         )}
 
         <div className="flex flex-col gap-3 border-t border-neutral-100 px-5 py-4 text-xs text-neutral-500 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <span>
-              {totalFiltered === 0
-                ? "No matching records"
-                : `Showing ${firstRecord}–${lastRecord} of ${totalFiltered} matching records`}
-              {" · "}Summary totals are counted from the database.
-            </span>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPage((current) => Math.max(0, current - 1))}
-                disabled={page === 0 || bookingsLoading}
-                className="rounded-lg border border-neutral-200 px-3 py-2 font-semibold text-neutral-700 hover:border-[#D97706] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Previous
-              </button>
-              <span className="whitespace-nowrap">
-                Page {totalPages === 0 ? 0 : page + 1} of {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((current) => Math.min(totalPages - 1, current + 1))}
-                disabled={totalPages === 0 || page >= totalPages - 1 || bookingsLoading}
-                className="rounded-lg border border-neutral-200 px-3 py-2 font-semibold text-neutral-700 hover:border-[#D97706] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Next
-              </button>
-            </div>
-          </div>
+          <span>Showing up to 200 most recent records. Summary totals are counted from the database.</span>
           {!bookingsPage && <Link to="/admin/bookings" className="inline-flex items-center gap-1.5 font-semibold text-[#B45309] hover:text-[#D97706]">Open bookings <ArrowRight size={14} /></Link>}
         </div>
       </section>

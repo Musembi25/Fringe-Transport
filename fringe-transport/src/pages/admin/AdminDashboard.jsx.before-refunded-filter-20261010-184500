@@ -1045,7 +1045,6 @@ export default function AdminDashboard() {
               <option value="unpaid">Unpaid</option>
               <option value="partial">Partially paid</option>
               <option value="paid">Paid</option>
-              <option value="refunded">Refunded</option>
             </select>
             <label className="flex items-center gap-2 rounded-xl border border-neutral-200 bg-white px-3 py-2 text-xs text-neutral-500">
               From
